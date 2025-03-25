@@ -1,0 +1,179 @@
+{
+    "tables": {
+        "DWJJOB": {
+            "description": "Collections and Deliverys",
+            "last_updated": "2025-03-24 15:44:56"
+        },
+        "DWVVEH": {
+            "description": "List of Cars",
+            "last_updated": "2025-03-24 16:28:13"
+        },
+        "EXTRACARINFO": {
+            "description": "Additional Car Information",
+            "last_updated": "2025-03-24 21:00:00"
+        }
+    },
+    "display_settings": {
+        "job_columns": {
+            "dwjSeq": false,
+            "dwjType": true,
+            "dwjCust": true,
+            "dwjName": true,
+            "dwjStatus": false,
+            "dwjDate": true,
+            "dwjTime": false,
+            "dwjDriver": false,
+            "dwjAdd1": false,
+            "dwjAdd2": false,
+            "dwjAdd3": false,
+            "dwjAdd4": false,
+            "dwjTown": false,
+            "dwjPostco": false
+        },
+        "vehicle_columns": {
+            "dwvKey": false,
+            "dwvDriver": false,
+            "dwvVehRef": true,
+            "dwvModDes": true,
+            "dwvStatus": false,
+            "dwvLoad": false,
+            "dwvColCus": false,
+            "dwvColCod": false,
+            "dwvDelCus": false,
+            "dwvDelCod": false,
+            "spareKeys": true,
+            "extra": true,
+            "carNotes": true
+        }
+    },
+    "columns": {
+        "DWJJOB.dwjkey": {
+            "description": "Job Key",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWJJOB.dwjDriver": {
+            "description": "Driver ID",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWJJOB.dwjDate": {
+            "description": "Job Date",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWJJOB.dwjTime": {
+            "description": "Job Time",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWJJOB.dwjSeq": {
+            "description": "Sequence Number",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWJJOB.dwjLoad": {
+            "description": "Load Number",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWJJOB.dwjType": {
+            "description": "Job Type",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWJJOB.dwjCust": {
+            "description": "Customer Code",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWJJOB.dwjName": {
+            "description": "Customer Name",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWJJOB.dwjAdd1": {
+            "description": "Address Line 1",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWJJOB.dwjAdd2": {
+            "description": "Address Line 2",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWJJOB.dwjAdd3": {
+            "description": "Address Line 3",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWJJOB.dwjAdd4": {
+            "description": "Address Line 4",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWJJOB.dwjTown": {
+            "description": "Town",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWJJOB.dwjPostco": {
+            "description": "Postcode",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWJJOB.dwjStatus": {
+            "description": "Job Status",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWVVEH.dwvKey": {
+            "description": "Vehicle Key",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWVVEH.dwvDriver": {
+            "description": "Driver ID",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWVVEH.dwvLoad": {
+            "description": "Load Number",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWVVEH.dwvVehRef": {
+            "description": "Vehicle Reference",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWVVEH.dwvModDes": {
+            "description": "Model Description",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWVVEH.dwvStatus": {
+            "description": "Vehicle Status",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWVVEH.dwvColCus": {
+            "description": "Collection Customer",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWVVEH.dwvColCod": {
+            "description": "Collection Code",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWVVEH.dwvDelCus": {
+            "description": "Delivery Customer",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "DWVVEH.dwvDelCod": {
+            "description": "Delivery Code",
+            "last_updated": "2025-03-24 16:30:00"
+        },
+        "EXTRACARINFO.idkey": {
+            "description": "Vehicle Key (matches dwvkey)",
+            "last_updated": "2025-03-24 21:00:00"
+        },
+        "EXTRACARINFO.carreg": {
+            "description": "Vehicle Registration (matches dwvvehref)",
+            "last_updated": "2025-03-24 21:00:00"
+        },
+        "EXTRACARINFO.sparekeys": {
+            "description": "Has Spare Keys (Y/N)",
+            "last_updated": "2025-03-24 21:00:00"
+        },
+        "EXTRACARINFO.photos": {
+            "description": "Array of Image File Names",
+            "last_updated": "2025-03-24 21:00:00"
+        },
+        "EXTRACARINFO.carnotes": {
+            "description": "Notes about Car (e.g., damage)",
+            "last_updated": "2025-03-24 21:00:00"
+        },
+        "EXTRACARINFO.extra": {
+            "description": "Has Documents (Y/N)",
+            "last_updated": "2025-03-24 21:00:00"
+        }
+    }
+}
