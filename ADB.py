@@ -568,9 +568,12 @@ def handle_sql_db(action="pull", device=None):
             log_message("Database file not found on sdcard", "ERROR")
             return False
         
-        # Try direct pull
+        # Try direct pull with proper path handling
         log_message("Attempting direct pull...", "INFO")
-        pull_cmd = f"{adb_prefix}pull {sdcard_path} {DB_PATH}"
+        # Convert Windows path to forward slashes and wrap in quotes
+        db_path_forward = DB_PATH.replace("\\", "/")
+        db_path_quoted = f'"{db_path_forward}"'
+        pull_cmd = f"{adb_prefix}pull {sdcard_path} {db_path_quoted}"
         if run_adb_command(pull_cmd, check_output=False, shell=True):
             if os.path.exists(DB_PATH):
                 file_size = os.path.getsize(DB_PATH)
@@ -603,10 +606,11 @@ def handle_sql_db(action="pull", device=None):
         # Try direct push method first
         log_message("Attempting direct push method...", "INFO")
         try:
-            # Convert Windows path to forward slashes for ADB
-            db_path_forward = DB_PATH.replace('\\', '/')
+            # Convert Windows path to forward slashes and wrap in quotes
+            db_path_forward = DB_PATH.replace("\\", "/")
+            db_path_quoted = f'"{db_path_forward}"'
             # Push to sdcard first
-            push_cmd = f'{adb_prefix}push "{db_path_forward}" {sdcard_path}'
+            push_cmd = f"{adb_prefix}push {db_path_quoted} {sdcard_path}"
             if run_adb_command(push_cmd, check_output=False, shell=True):
                 # Set permissions on sdcard file
                 run_adb_command(f"{adb_prefix}shell su 0 chmod 666 {sdcard_path}", check_output=False, shell=True)
@@ -630,10 +634,11 @@ def handle_sql_db(action="pull", device=None):
         # If direct method fails, try root copy method
         log_message("Attempting root copy method...", "INFO")
         try:
-            # Convert Windows path to forward slashes for ADB
-            db_path_forward = DB_PATH.replace('\\', '/')
+            # Convert Windows path to forward slashes and wrap in quotes
+            db_path_forward = DB_PATH.replace("\\", "/")
+            db_path_quoted = f'"{db_path_forward}"'
             # Copy directly to app directory with root
-            copy_cmd = f"{adb_prefix}shell su 0 cp {db_path_forward} {device_db_path}"
+            copy_cmd = f"{adb_prefix}shell su 0 cp {db_path_quoted} {device_db_path}"
             if run_adb_command(copy_cmd, check_output=False, shell=True):
                 # Set correct permissions
                 run_adb_command(f"{adb_prefix}shell su 0 chmod 600 {device_db_path}", check_output=False, shell=True)
