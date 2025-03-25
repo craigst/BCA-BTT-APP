@@ -591,7 +591,7 @@ class PaperworkManager:
             message_parts.append(f"{loaded_cars} CAR{'S' if loaded_cars > 1 else ''} LOADED")
         
         if cars_with_docs > 0:
-            message_parts.append(f"{cars_with_docs} CAR{'S' if cars_with_docs > 1 else ''} HAVE DOCUMENTS ALL DOCUMENTS ON PASSENGER SEAT")
+            message_parts.append(f"{cars_with_docs} CAR{'S' if cars_with_docs > 1 else ''} HAVE DOCUMENTS ALL DOCUMENTS ON PASSENGER SEAT'S")
         
         if cars_with_keys > 0:
             message_parts.append(f"{cars_with_keys} CAR{'S' if cars_with_keys > 1 else ''} HAVE SPARE KEYS")
