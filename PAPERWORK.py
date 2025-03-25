@@ -19,7 +19,7 @@ from openpyxl import load_workbook
 from openpyxl.drawing.image import Image as OpenpyxlImage
 import colorama
 from colorama import Fore, Back, Style
-from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
+from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker, AbsoluteAnchor, XDRPoint2D, XDRPositiveSize2D
 from openpyxl.utils.units import pixels_to_EMU, cm_to_EMU, EMU_to_pixels
 from openpyxl.utils.cell import coordinate_from_string, column_index_from_string
 
@@ -114,7 +114,8 @@ class PaperworkManager:
     def __init__(self):
         """Initialize the paperwork manager with PostgreSQL configuration."""
         self.pg_config = self.load_pg_config()
-        self.auto_signature = True  # Default to True
+        self.config_file = os.path.join(SCRIPT_DIR, "config.ini")
+        self.auto_signature = self.load_auto_signature_config()
         
     def load_pg_config(self):
         """Load PostgreSQL configuration from sql.ini file."""
@@ -137,6 +138,29 @@ class PaperworkManager:
         except Exception as e:
             logging.error(f"Error loading PostgreSQL configuration: {e}")
             return None
+
+    def load_auto_signature_config(self):
+        """Load auto signature setting from config file."""
+        config = configparser.ConfigParser()
+        try:
+            if os.path.exists(self.config_file):
+                config.read(self.config_file)
+                return config.getboolean('Settings', 'auto_signature', fallback=True)
+        except Exception as e:
+            logging.error(f"Error loading auto signature config: {e}")
+        return True  # Default to True if config file doesn't exist or has error
+        
+    def save_auto_signature_config(self):
+        """Save auto signature setting to config file."""
+        config = configparser.ConfigParser()
+        config['Settings'] = {
+            'auto_signature': str(self.auto_signature).lower()
+        }
+        try:
+            with open(self.config_file, 'w') as f:
+                config.write(f)
+        except Exception as e:
+            logging.error(f"Error saving auto signature config: {e}")
 
     def get_week_dates(self):
         """Get list of recent Sundays plus current/following week."""
@@ -427,9 +451,57 @@ class PaperworkManager:
             print(f"{Fore.YELLOW}Operation cancelled.{Style.RESET_ALL}")
             return False
             
-        # TODO: Implement loadsheet generation using template
-        print(f"{Fore.GREEN}Loadsheet generation will be implemented here.{Style.RESET_ALL}")
-        return True
+        try:
+            # Create test directory if it doesn't exist
+            test_dir = os.path.join(SCRIPT_DIR, "test")
+            os.makedirs(test_dir, exist_ok=True)
+            
+            # Copy template to test.xlsx
+            template_path = os.path.join(SCRIPT_DIR, "templates", "loadsheet.xlsx")
+            test_file_path = os.path.join(test_dir, "test.xlsx")
+            
+            if not os.path.exists(template_path):
+                print(f"{Fore.RED}Template file not found at {template_path}{Style.RESET_ALL}")
+                return False
+            
+            # Copy template file
+            import shutil
+            shutil.copy2(template_path, test_file_path)
+            
+            # Load the workbook
+            wb = load_workbook(test_file_path)
+            ws = wb["Loadsheet"]
+            
+            # Update loadsheet with data
+            # ... (existing loadsheet update code) ...
+            
+            # Add signatures if auto_signature is enabled
+            if self.auto_signature:
+                self.add_signatures(ws)
+            
+            # Save the workbook
+            wb.save(test_file_path)
+            print(f"{Fore.GREEN}Loadsheet created successfully at: {test_file_path}{Style.RESET_ALL}")
+            
+            # Ask if user wants to verify the file
+            verify = input(f"\n{Fore.YELLOW}Open loadsheet to verify? (y/n):{Style.RESET_ALL} ").strip().lower()
+            if verify == 'y':
+                try:
+                    if os.name == 'nt':  # Windows
+                        os.startfile(test_file_path)
+                    elif os.name == 'posix':  # macOS and Linux
+                        import subprocess
+                        subprocess.run(['xdg-open', test_file_path])
+                except Exception as e:
+                    print(f"{Fore.YELLOW}Warning: Could not open file automatically: {e}{Style.RESET_ALL}")
+                    print(f"{Fore.CYAN}Please open the file manually at: {test_file_path}{Style.RESET_ALL}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"{Fore.RED}Error creating loadsheet: {e}{Style.RESET_ALL}")
+            logging.error(f"Error creating loadsheet: {e}", exc_info=True)
+            return False
 
     def create_timesheet(self, selected_sunday):
         """Create a timesheet for the selected week."""
@@ -605,15 +677,8 @@ class PaperworkManager:
             sig1_dir = os.path.join(SCRIPT_DIR, "signature", "sig1")
             sig2_dir = os.path.join(SCRIPT_DIR, "signature", "sig2")
             
-            logging.info(f"Looking for signature files in directories:")
-            logging.info(f"sig1_dir: {sig1_dir}")
-            logging.info(f"sig2_dir: {sig2_dir}")
-            
             sig1_files = [f for f in os.listdir(sig1_dir) if f.lower().endswith('.png')]
             sig2_files = [f for f in os.listdir(sig2_dir) if f.lower().endswith('.png')]
-            
-            logging.info(f"Found {len(sig1_files)} files in sig1 directory")
-            logging.info(f"Found {len(sig2_files)} files in sig2 directory")
             
             if not sig1_files or not sig2_files:
                 print(f"{Fore.YELLOW}Warning: Missing signature files{Style.RESET_ALL}")
@@ -622,103 +687,139 @@ class PaperworkManager:
             
             # Randomly select signature files
             sig1_path = os.path.join(sig1_dir, random.choice(sig1_files))
-            # Ensure sig2 is different from sig1
             sig2_files = [f for f in sig2_files if f != os.path.basename(sig1_path)]
-            if not sig2_files:  # If no different sig2 files available, use any sig2 file
+            if not sig2_files:
                 sig2_files = [f for f in os.listdir(sig2_dir) if f.lower().endswith('.png')]
             sig2_path = os.path.join(sig2_dir, random.choice(sig2_files))
             
-            logging.info(f"Selected signature files:")
-            logging.info(f"sig1_path: {sig1_path}")
-            logging.info(f"sig2_path: {sig2_path}")
-            
-            # Create signature config
-            config = SignatureConfig()
-            
-            # Add first signature
+            # Create images
             img1 = OpenpyxlImage(sig1_path)
-            img1.width = int(img1.width * config.scale)
-            img1.height = int(img1.height * config.scale)
-            
-            # Add second signature
             img2 = OpenpyxlImage(sig2_path)
-            img2.width = int(img2.width * config.scale)
-            img2.height = int(img2.height * config.scale)
             
-            logging.info(f"Image dimensions after scaling:")
-            logging.info(f"img1: {img1.width}x{img1.height}")
-            logging.info(f"img2: {img2.width}x{img2.height}")
+            # Set base size with 1.5x scaling
+            base_width = 100
+            base_height = 50
+            scale_factor = 1.5
             
-            # Get random offsets and positions
-            pos1 = config.get_sig1_position()
-            pos2 = config.get_sig2_position()
+            img1.width = int(base_width * scale_factor)
+            img1.height = int(base_height * scale_factor)
+            img2.width = int(base_width * scale_factor)
+            img2.height = int(base_height * scale_factor)
             
-            logging.info(f"Signature positions:")
-            logging.info(f"pos1: {pos1}")
-            logging.info(f"pos2: {pos2}")
+            # Get cell positions and dimensions
+            x1, y1 = self.get_cell_position(ws, 'C44')
+            x2, y2 = self.get_cell_position(ws, 'H44')
             
-            # Convert cell references to row/column numbers
-            col1, row1 = coordinate_from_string(pos1['cell'])
-            col2, row2 = coordinate_from_string(pos2['cell'])
+            width1, height1 = self.get_cell_dimensions(ws, 'C44')
+            width2, height2 = self.get_cell_dimensions(ws, 'H44')
             
-            # Convert column letters to numbers
-            col1_num = column_index_from_string(col1)
-            col2_num = column_index_from_string(col2)
+            # Randomly choose a vertical offset mode (4-7)
+            vertical_mode = random.randint(4, 7)
             
-            logging.info(f"Converted cell references:")
-            logging.info(f"col1: {col1} -> {col1_num}, row1: {row1}")
-            logging.info(f"col2: {col2} -> {col2_num}, row2: {row2}")
+            # Add fixed right offset for sig1
+            SIG1_RIGHT_OFFSET = 35  # Fixed right offset for sig1
+            x1 = x1 + SIG1_RIGHT_OFFSET
             
-            # Create anchors for both signatures
-            marker1 = AnchorMarker(col=col1_num, colOff=0, row=row1, rowOff=0)
-            img1.anchor = OneCellAnchor(_from=marker1)
+            # Generate random rotation (-15 to +15 degrees)
+            rotation = random.randint(-15, 15)
             
-            # Signature 2 anchor
-            marker2 = AnchorMarker(col=col2_num, colOff=0, row=row2, rowOff=0)
-            img2.anchor = OneCellAnchor(_from=marker2)
+            # Apply placement mode
+            if vertical_mode == 4:  # Centered with small vertical offset
+                x1_centered = x1 + (width1 - img1.width) / 2
+                y1_centered = y1 + (height1 - img1.height) / 2 - 10
+                x2_centered = x2 + (width2 - img2.width) / 2
+                y2_centered = y2 + (height2 - img2.height) / 2 - 10
+                
+                img1.anchor = self.create_absolute_anchor(x1_centered, y1_centered, img1.width, img1.height)
+                img2.anchor = self.create_absolute_anchor(x2_centered, y2_centered, img2.width, img2.height)
             
-            # Apply offsets (in EMU units - 9525 EMUs per pixel)
-            EMU_PER_PIXEL = 9525
+            elif vertical_mode == 5:  # Basic with medium vertical offset
+                y1_offset = y1 - 20
+                y2_offset = y2 - 20
+                
+                img1.anchor = self.create_absolute_anchor(x1, y1_offset, img1.width, img1.height)
+                img2.anchor = self.create_absolute_anchor(x2, y2_offset, img2.width, img2.height)
             
-            # Calculate cell dimensions (approximate)
-            CELL_WIDTH_EMU = 9525 * 8  # Approximate cell width in EMUs
-            CELL_HEIGHT_EMU = 9525 * 15  # Approximate cell height in EMUs
+            elif vertical_mode == 6:  # Centered with medium vertical offset
+                x1_centered = x1 + (width1 - img1.width) / 2
+                y1_centered = y1 + (height1 - img1.height) / 2 - 20
+                x2_centered = x2 + (width2 - img2.width) / 2
+                y2_centered = y2 + (height2 - img2.height) / 2 - 20
+                
+                img1.anchor = self.create_absolute_anchor(x1_centered, y1_centered, img1.width, img1.height)
+                img2.anchor = self.create_absolute_anchor(x2_centered, y2_centered, img2.width, img2.height)
             
-            # Apply offsets to signature 1 with cell overlap
-            if pos1['allow_overlap']:
-                # Center the image in the cell and then apply offsets
-                img1.anchor._from.colOff = int((CELL_WIDTH_EMU / 2) + (pos1['offset_x'] * EMU_PER_PIXEL))
-                img1.anchor._from.rowOff = int((CELL_HEIGHT_EMU / 2) + (pos1['offset_y'] * EMU_PER_PIXEL))
-            else:
-                img1.anchor._from.colOff = int(pos1['offset_x'] * EMU_PER_PIXEL)
-                img1.anchor._from.rowOff = int(pos1['offset_y'] * EMU_PER_PIXEL)
+            elif vertical_mode == 7:  # Basic with large vertical offset
+                y1_offset = y1 - 30
+                y2_offset = y2 - 30
+                
+                img1.anchor = self.create_absolute_anchor(x1, y1_offset, img1.width, img1.height)
+                img2.anchor = self.create_absolute_anchor(x2, y2_offset, img2.width, img2.height)
             
-            # Apply offsets to signature 2 with cell overlap
-            if pos2['allow_overlap']:
-                # Center the image in the cell and then apply offsets
-                img2.anchor._from.colOff = int((CELL_WIDTH_EMU / 2) + (pos2['offset_x'] * EMU_PER_PIXEL))
-                img2.anchor._from.rowOff = int((CELL_HEIGHT_EMU / 2) + (pos2['offset_y'] * EMU_PER_PIXEL))
-            else:
-                img2.anchor._from.colOff = int(pos2['offset_x'] * EMU_PER_PIXEL)
-                img2.anchor._from.rowOff = int(pos2['offset_y'] * EMU_PER_PIXEL)
+            # Add rotation to both images
+            img1.rotation = rotation
+            img2.rotation = rotation
             
-            logging.info(f"Applied offsets (in EMU):")
-            logging.info(f"img1: colOff={img1.anchor._from.colOff}, rowOff={img1.anchor._from.rowOff}")
-            logging.info(f"img2: colOff={img2.anchor._from.colOff}, rowOff={img2.anchor._from.rowOff}")
+            # Add images to worksheet
+            ws.add_image(img1)
+            ws.add_image(img2)
             
-            # Add images to worksheet using the anchor
-            ws.add_image(img1, pos1['cell'])
-            ws.add_image(img2, pos2['cell'])
-            
-            logging.info("Successfully added images to worksheet")
-            
-            print(f"{Fore.GREEN}Signatures added successfully with offsets:{Style.RESET_ALL}")
-            print(f"{Fore.CYAN}Signature 1: Cell {pos1['cell']}, Offset X: {pos1['offset_x']}px, Y: {pos1['offset_y']}px{Style.RESET_ALL}")
-            print(f"{Fore.CYAN}Signature 2: Cell {pos2['cell']}, Offset X: {pos2['offset_x']}px, Y: {pos2['offset_y']}px{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}Signatures added successfully with rotation {rotation}°{Style.RESET_ALL}")
             
         except Exception as e:
             print(f"{Fore.YELLOW}Warning: Could not add signatures: {e}{Style.RESET_ALL}")
             logging.error(f"Error adding signatures: {e}", exc_info=True)
+
+    def get_cell_position(self, ws, cell):
+        """Get cell position in pixels from top-left of sheet."""
+        col, row = coordinate_from_string(cell)
+        col_idx = column_index_from_string(col)
+        
+        # Calculate position by summing up previous column widths and row heights
+        x = 0
+        for i in range(1, col_idx):
+            col_letter = chr(ord('A') + i - 1)
+            col_width = ws.column_dimensions[col_letter].width or 8.43
+            x += col_width * 7
+        
+        y = 0
+        for i in range(1, row):
+            row_height = ws.row_dimensions[i].height or 15
+            y += row_height * 1.2
+            
+        # Add vertical offset to move down from row 44
+        VERTICAL_ROW_OFFSET = 18 * 7  # Move down 7 rows from row 44
+        y = y + VERTICAL_ROW_OFFSET
+            
+        return x, y
+
+    def get_cell_dimensions(self, ws, cell):
+        """Get cell dimensions in pixels."""
+        col, row = coordinate_from_string(cell)
+        col_idx = column_index_from_string(col)
+        
+        # Get column width (in characters)
+        col_width = ws.column_dimensions[col].width or 8.43
+        # Get row height (in points)
+        row_height = ws.row_dimensions[row].height or 15
+        
+        # Convert to pixels
+        width_px = col_width * 7
+        height_px = row_height * 1.2
+        
+        return width_px, height_px
+
+    def create_absolute_anchor(self, x_px, y_px, width_px, height_px):
+        """Create an absolute anchor with size."""
+        EMU_PER_PIXEL = 9525
+        x_emu = int(x_px * EMU_PER_PIXEL)
+        y_emu = int(y_px * EMU_PER_PIXEL)
+        width_emu = int(width_px * EMU_PER_PIXEL)
+        height_emu = int(height_px * EMU_PER_PIXEL)
+        
+        anchor = AbsoluteAnchor(pos=XDRPoint2D(x=x_emu, y=y_emu))
+        anchor.ext = XDRPositiveSize2D(cx=width_emu, cy=height_emu)
+        return anchor
 
     def test_loadsheet(self, load_number=None):
         """Test loadsheet generation with debug information."""
@@ -946,23 +1047,39 @@ class PaperworkManager:
                     
                     # Update header information
                     if collections:
+                        # Get the first collection date
                         date_str = str(collections[0][3])
                         try:
                             if len(date_str) == 8:  # Ensure date string is in YYYYMMDD format
                                 date_obj = datetime.strptime(date_str, '%Y%m%d')
-                                safe_cell_write('C6', date_obj.strftime('%d/%m/%Y'))  # Date
-                                safe_cell_write('H46', date_obj.strftime('%d/%m/%Y'))  # Collection date
+                                formatted_date = date_obj.strftime('%d/%m/%Y')
+                                # Update collection date in header
+                                safe_cell_write('C6', formatted_date)  # Collection date in header
                         except ValueError as e:
-                            print(f"{Fore.YELLOW}Warning: Error parsing date ({date_str}): {e}{Style.RESET_ALL}")
+                            print(f"{Fore.YELLOW}Warning: Error parsing collection date ({date_str}): {e}{Style.RESET_ALL}")
                     
                     if deliveries:
+                        # Get the first delivery date
                         date_str = str(deliveries[0][3])
                         try:
                             if len(date_str) == 8:  # Ensure date string is in YYYYMMDD format
                                 date_obj = datetime.strptime(date_str, '%Y%m%d')
-                                safe_cell_write('C46', date_obj.strftime('%d/%m/%Y'))  # Delivery date
+                                formatted_date = date_obj.strftime('%d/%m/%Y')
+                                # Update delivery date in signature section
+                                safe_cell_write('H46', formatted_date)  # Delivery date in signature section
                         except ValueError as e:
-                            print(f"{Fore.YELLOW}Warning: Error parsing date ({date_str}): {e}{Style.RESET_ALL}")
+                            print(f"{Fore.YELLOW}Warning: Error parsing delivery date ({date_str}): {e}{Style.RESET_ALL}")
+                    
+                    # Update collection date in signature section
+                    if collections:
+                        date_str = str(collections[0][3])
+                        try:
+                            if len(date_str) == 8:  # Ensure date string is in YYYYMMDD format
+                                date_obj = datetime.strptime(date_str, '%Y%m%d')
+                                formatted_date = date_obj.strftime('%d/%m/%Y')
+                                safe_cell_write('C46', formatted_date)  # Collection date in signature section
+                        except ValueError as e:
+                            print(f"{Fore.YELLOW}Warning: Error parsing collection date ({date_str}): {e}{Style.RESET_ALL}")
                     
                     safe_cell_write('G6', str(load_number))  # Load Number
                     safe_cell_write('I6', str(load_number))  # Job ID (using load number)
@@ -1000,18 +1117,18 @@ class PaperworkManager:
                     for i, vehicle in enumerate(formatted_vehicles[:8]):  # Handle up to 8 vehicles
                         base_row = 11 + (i * 4)  # Starting from row 11, increment by 4 for each car
                         
-                        # Car details
-                        safe_cell_write(f'B{base_row}', str(vehicle[0] or ''))  # Make + Model
-                        safe_cell_write(f'B{base_row + 2}', str(vehicle[1] or ''))  # Registration
+                        # Car details - swapped registration and make & model, and capitalize all data
+                        safe_cell_write(f'B{base_row}', str(vehicle[1] or '').upper())  # Registration (now in B column)
+                        safe_cell_write(f'B{base_row + 2}', str(vehicle[0] or '').upper())  # Make & Model (now in B+2)
                         safe_cell_write(f'E{base_row - 1}', 'N')  # Offloaded (default)
                         safe_cell_write(f'G{base_row - 1}', 'Y')  # Documents (default)
-                        safe_cell_write(f'I{base_row - 1}', str(vehicle[4] or 'Y'))  # Spare Keys
+                        safe_cell_write(f'I{base_row - 1}', str(vehicle[4] or 'Y').upper())  # Spare Keys
                         if vehicle[6]:  # Notes
-                            safe_cell_write(f'C{base_row}', str(vehicle[6]))
+                            safe_cell_write(f'C{base_row}', str(vehicle[6]).upper())
                     
                     # Generate and add load summary message
                     summary_message = self.generate_load_summary(formatted_vehicles)
-                    safe_cell_write('C39', summary_message)
+                    safe_cell_write('C39', summary_message.upper())  # Capitalize summary message
                     
                     # Add signatures if auto_signature is enabled
                     if self.auto_signature:
@@ -1057,8 +1174,9 @@ class PaperworkManager:
             return False
 
     def toggle_auto_signature(self):
-        """Toggle auto signature feature on/off."""
+        """Toggle auto signature feature on/off and save setting."""
         self.auto_signature = not self.auto_signature
+        self.save_auto_signature_config()
         status = "enabled" if self.auto_signature else "disabled"
         print(f"{Fore.GREEN}Auto signature {status}.{Style.RESET_ALL}")
 
