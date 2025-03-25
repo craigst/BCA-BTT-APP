@@ -20,6 +20,7 @@ db/
 
 # VS Code settings
 .vscode/
+*.code-workspace
 
 # Python bytecode
 __pycache__/
@@ -52,4 +53,13 @@ local_settings.py
 
 # Backup files
 *.bak
-*~ 
+*~
+
+# Project specific folders
+/signature/
+/timesheets/
+/images/
+/templates/
+/loadsheets/
+# SQL configuration files
+sql.ini 

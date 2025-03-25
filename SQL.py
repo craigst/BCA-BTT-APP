@@ -247,9 +247,14 @@ class TimesheetManager:
             logging.info(f"Days to last Sunday: {days_to_last_sunday}")
             logging.info(f"Last Sunday: {last_sunday.strftime('%A %d-%m-%Y')}")
             
-            # Show last 4 Sundays
+            # Show last 4 Sundays plus current/following week
             sundays = [(last_sunday - timedelta(weeks=i)).strftime("%A %d-%m-%Y") 
                       for i in range(4)]
+            
+            # Add current/following week if we're not already showing it
+            next_sunday = last_sunday + timedelta(weeks=1)
+            if next_sunday.strftime("%A %d-%m-%Y") not in sundays:
+                sundays.insert(0, next_sunday.strftime("%A %d-%m-%Y"))
             
             # Validate that we have actual Sundays
             for date_str in sundays:
@@ -264,14 +269,19 @@ class TimesheetManager:
             for i, sunday in enumerate(sundays, 1):
                 print(f"{Fore.WHITE}{i}. {Fore.YELLOW}{sunday}{Style.RESET_ALL}")
             
-            choice = input(f"\n{Fore.CYAN}Enter week number (1-4):{Style.RESET_ALL} ").strip()
+            choice = input(f"\n{Fore.CYAN}Enter week number (1-{len(sundays)}):{Style.RESET_ALL} ").strip()
             try:
                 week_idx = int(choice) - 1
                 if not (0 <= week_idx < len(sundays)):
                     print(f"{Fore.RED}Invalid selection.{Style.RESET_ALL}")
                     return
                 
-                selected_sunday = last_sunday - timedelta(weeks=week_idx)
+                # Calculate selected Sunday based on the index
+                if week_idx == 0:  # Next Sunday
+                    selected_sunday = next_sunday
+                else:  # Past Sundays
+                    selected_sunday = last_sunday - timedelta(weeks=week_idx-1)
+                
                 week_start = selected_sunday - timedelta(days=6)  # Monday
                 
                 # Get data from database
@@ -492,9 +502,14 @@ class TimesheetManager:
             logging.info(f"Days to last Sunday: {days_to_last_sunday}")
             logging.info(f"Last Sunday: {last_sunday.strftime('%A %d-%m-%Y')}")
             
-            # Show last 4 Sundays
+            # Show last 4 Sundays plus current/following week
             sundays = [(last_sunday - timedelta(weeks=i)).strftime("%A %d-%m-%Y") 
                       for i in range(4)]
+            
+            # Add current/following week if we're not already showing it
+            next_sunday = last_sunday + timedelta(weeks=1)
+            if next_sunday.strftime("%A %d-%m-%Y") not in sundays:
+                sundays.insert(0, next_sunday.strftime("%A %d-%m-%Y"))
             
             # Validate that we have actual Sundays
             for date_str in sundays:
@@ -509,14 +524,19 @@ class TimesheetManager:
             for i, sunday in enumerate(sundays, 1):
                 print(f"{Fore.WHITE}{i}. {Fore.YELLOW}{sunday}{Style.RESET_ALL}")
             
-            choice = input(f"\n{Fore.CYAN}Enter week number (1-4):{Style.RESET_ALL} ").strip()
+            choice = input(f"\n{Fore.CYAN}Enter week number (1-{len(sundays)}):{Style.RESET_ALL} ").strip()
             try:
                 week_idx = int(choice) - 1
                 if not (0 <= week_idx < len(sundays)):
                     print(f"{Fore.RED}Invalid selection.{Style.RESET_ALL}")
                     return
                 
-                selected_sunday = last_sunday - timedelta(weeks=week_idx)
+                # Calculate selected Sunday based on the index
+                if week_idx == 0:  # Next Sunday
+                    selected_sunday = next_sunday
+                else:  # Past Sundays
+                    selected_sunday = last_sunday - timedelta(weeks=week_idx-1)
+                
                 week_start = selected_sunday - timedelta(days=6)  # Monday
                 
                 # Format dates for SQL query (YYYYMMDD)
@@ -788,25 +808,45 @@ class TimesheetManager:
             # Get list of recent Sundays
             today = datetime.now()
             current_weekday = today.weekday()
+            # Calculate last Sunday (weekday 6 is Sunday)
             days_to_last_sunday = (current_weekday + 1) % 7
             last_sunday = today - timedelta(days=days_to_last_sunday)
             
-            # Show last 4 Sundays
+            # Show last 4 Sundays plus current/following week
             sundays = [(last_sunday - timedelta(weeks=i)).strftime("%A %d-%m-%Y") 
                       for i in range(4)]
+            
+            # Add current/following week if we're not already showing it
+            next_sunday = last_sunday + timedelta(weeks=1)
+            if next_sunday.strftime("%A %d-%m-%Y") not in sundays:
+                sundays.insert(0, next_sunday.strftime("%A %d-%m-%Y"))
+            
+            # Validate that we have actual Sundays
+            for date_str in sundays:
+                date = datetime.strptime(date_str, "%A %d-%m-%Y")
+                if date.weekday() != 6:  # 6 is Sunday
+                    logging.error(f"Invalid Sunday date found: {date_str} (weekday: {date.weekday()})")
+                    raise ValueError(f"Invalid Sunday date: {date_str}")
+            
+            logging.info(f"Available Sundays: {sundays}")
             
             print(f"\n{Fore.CYAN}Select week end date (Sunday):{Style.RESET_ALL}")
             for i, sunday in enumerate(sundays, 1):
                 print(f"{Fore.WHITE}{i}. {Fore.YELLOW}{sunday}{Style.RESET_ALL}")
             
-            choice = input(f"\n{Fore.CYAN}Enter week number (1-4):{Style.RESET_ALL} ").strip()
+            choice = input(f"\n{Fore.CYAN}Enter week number (1-{len(sundays)}):{Style.RESET_ALL} ").strip()
             try:
                 week_idx = int(choice) - 1
                 if not (0 <= week_idx < len(sundays)):
                     print(f"{Fore.RED}Invalid selection.{Style.RESET_ALL}")
                     return
                 
-                selected_sunday = last_sunday - timedelta(weeks=week_idx)
+                # Calculate selected Sunday based on the index
+                if week_idx == 0:  # Next Sunday
+                    selected_sunday = next_sunday
+                else:  # Past Sundays
+                    selected_sunday = last_sunday - timedelta(weeks=week_idx-1)
+                
                 week_start = selected_sunday - timedelta(days=6)
                 
                 # Format dates for SQL query
