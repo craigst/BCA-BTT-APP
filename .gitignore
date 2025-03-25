@@ -61,5 +61,6 @@ local_settings.py
 /images/
 /templates/
 /loadsheets/
+/test/
 # SQL configuration files
 sql.ini 
