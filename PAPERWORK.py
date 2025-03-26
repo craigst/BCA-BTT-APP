@@ -437,128 +437,546 @@ class PaperworkManager:
         return True
 
     def create_loadsheet(self, load_number):
-        """Create a loadsheet for a specific load."""
-        load_data = self.get_load_info(load_number)
-        if not load_data:
-            print(f"{Fore.RED}Failed to get load information.{Style.RESET_ALL}")
-            return False
-            
-        if not self.show_load_summary(load_data):
-            return False
-            
-        confirm = input(f"\n{Fore.YELLOW}Create loadsheet for load {load_number}? (y/n):{Style.RESET_ALL} ").strip().lower()
-        if confirm != 'y':
-            print(f"{Fore.YELLOW}Operation cancelled.{Style.RESET_ALL}")
-            return False
-            
+        """Create a loadsheet for the specified load."""
+        wb = None
         try:
-            # Create test directory if it doesn't exist
-            test_dir = os.path.join(SCRIPT_DIR, "test")
-            os.makedirs(test_dir, exist_ok=True)
+            # Create loadsheets directory if it doesn't exist
+            loadsheets_dir = os.path.join(SCRIPT_DIR, "loadsheets")
+            os.makedirs(loadsheets_dir, exist_ok=True)
+            logging.info(f"Created/verified loadsheets directory: {loadsheets_dir}")
             
-            # Copy template to test.xlsx
-            template_path = os.path.join(SCRIPT_DIR, "templates", "loadsheet.xlsx")
-            test_file_path = os.path.join(test_dir, "test.xlsx")
-            
-            if not os.path.exists(template_path):
-                print(f"{Fore.RED}Template file not found at {template_path}{Style.RESET_ALL}")
+            # Get load info directly from database
+            try:
+                conn = psycopg2.connect(**self.pg_config)
+                cursor = conn.cursor()
+                logging.info("Database connection successful")
+                print(f"{Fore.GREEN}Database connection successful.{Style.RESET_ALL}")
+            except Exception as e:
+                logging.error(f"Database connection failed: {e}")
+                print(f"{Fore.RED}Database connection failed: {e}{Style.RESET_ALL}")
                 return False
             
-            # Copy template file
-            import shutil
-            shutil.copy2(template_path, test_file_path)
-            
-            # Load the workbook
-            wb = load_workbook(test_file_path)
-            ws = wb["Loadsheet"]
-            
-            # Update loadsheet with data
-            # ... (existing loadsheet update code) ...
-            
-            # Add signatures if auto_signature is enabled
-            if self.auto_signature:
-                self.add_signatures(ws)
-            
-            # Save the workbook
-            wb.save(test_file_path)
-            print(f"{Fore.GREEN}Loadsheet created successfully at: {test_file_path}{Style.RESET_ALL}")
-            
-            # Ask if user wants to verify the file
-            verify = input(f"\n{Fore.YELLOW}Open loadsheet to verify? (y/n):{Style.RESET_ALL} ").strip().lower()
-            if verify == 'y':
-                try:
-                    if os.name == 'nt':  # Windows
-                        os.startfile(test_file_path)
-                    elif os.name == 'posix':  # macOS and Linux
-                        import subprocess
-                        subprocess.run(['xdg-open', test_file_path])
-                except Exception as e:
-                    print(f"{Fore.YELLOW}Warning: Could not open file automatically: {e}{Style.RESET_ALL}")
-                    print(f"{Fore.CYAN}Please open the file manually at: {test_file_path}{Style.RESET_ALL}")
-            
-            return True
+            try:
+                # Get collections
+                cursor.execute("""
+                    SELECT 
+                        j.dwjtype,
+                        j.dwjcust,
+                        j.dwjname,
+                        j.dwjdate,
+                        j.dwjadrcod,
+                        j.dwjpostco,
+                        j.dwjvehs,
+                        v.dwvvehref,
+                        v.dwvmoddes,
+                        COALESCE(e.sparekeys, 'Y') as sparekeys,
+                        COALESCE(e.extra, 'Y') as extra,
+                        COALESCE(e.carnotes, '') as carnotes,
+                        v.dwvcolcod,
+                        v.dwvdelcod
+                    FROM public.dwjjob j
+                    LEFT JOIN public.dwvveh v ON j.dwjload = v.dwvload AND j.dwjadrcod = v.dwvcolcod
+                    LEFT JOIN public.extracarinfo e ON v.dwvkey = e.idkey
+                    WHERE j.dwjload = %s
+                    AND j.dwjtype = 'C'
+                    ORDER BY j.dwjdate, j.dwjcust
+                """, (load_number,))
+                
+                collections = cursor.fetchall()
+                logging.info(f"Found {len(collections)} collections for load {load_number}")
+                
+                # Get deliveries
+                cursor.execute("""
+                    SELECT 
+                        j.dwjtype,
+                        j.dwjcust,
+                        j.dwjname,
+                        j.dwjdate,
+                        j.dwjadrcod,
+                        j.dwjpostco,
+                        j.dwjvehs,
+                        v.dwvvehref,
+                        v.dwvmoddes,
+                        COALESCE(e.sparekeys, 'Y') as sparekeys,
+                        COALESCE(e.extra, 'Y') as extra,
+                        COALESCE(e.carnotes, '') as carnotes,
+                        v.dwvcolcod,
+                        v.dwvdelcod
+                    FROM public.dwjjob j
+                    LEFT JOIN public.dwvveh v ON j.dwjload = v.dwvload AND j.dwjadrcod = v.dwvdelcod
+                    LEFT JOIN public.extracarinfo e ON v.dwvkey = e.idkey
+                    WHERE j.dwjload = %s
+                    AND j.dwjtype = 'D'
+                    ORDER BY j.dwjdate, j.dwjcust
+                """, (load_number,))
+                
+                deliveries = cursor.fetchall()
+                logging.info(f"Found {len(deliveries)} deliveries for load {load_number}")
+                
+                # Get vehicles
+                cursor.execute("""
+                    SELECT DISTINCT
+                        v.dwvvehref,
+                        v.dwvmoddes,
+                        v.dwvcolcod,
+                        v.dwvdelcod,
+                        COALESCE(e.sparekeys, 'Y') as sparekeys,
+                        COALESCE(e.extra, 'Y') as extra,
+                        COALESCE(e.carnotes, '') as carnotes
+                    FROM public.dwvveh v
+                    LEFT JOIN public.extracarinfo e ON v.dwvkey = e.idkey
+                    WHERE v.dwvload = %s
+                    ORDER BY v.dwvvehref
+                """, (load_number,))
+                
+                vehicles = cursor.fetchall()
+                logging.info(f"Found {len(vehicles)} vehicles for load {load_number}")
+                
+                if not collections and not deliveries:
+                    logging.warning(f"No details found for load {load_number}")
+                    print(f"{Fore.YELLOW}No details found for this load.{Style.RESET_ALL}")
+                    return False
+                
+                # Get the date from the first collection or delivery
+                date_str = None
+                if collections:
+                    date_str = str(collections[0][3])
+                elif deliveries:
+                    date_str = str(deliveries[0][3])
+                
+                if not date_str:
+                    logging.error(f"No date found for load {load_number}")
+                    print(f"{Fore.RED}No date found for load {load_number}{Style.RESET_ALL}")
+                    return False
+                
+                # Convert date to datetime
+                load_date = datetime.strptime(date_str, '%Y%m%d')
+                logging.info(f"Load date: {load_date.strftime('%Y-%m-%d')}")
+                
+                # Create week folder with Sunday's date
+                week_end = load_date + timedelta(days=(6 - load_date.weekday()))
+                week_folder = os.path.join(loadsheets_dir, week_end.strftime("%d-%m-%Y"))
+                os.makedirs(week_folder, exist_ok=True)
+                logging.info(f"Created/verified week folder: {week_folder}")
+                
+                # Get town name from first collection or delivery
+                town_name = ""
+                if collections:
+                    town_name = collections[0][2] or ""  # dwjname from first collection
+                elif deliveries:
+                    town_name = deliveries[0][2] or ""  # dwjname from first delivery
+                logging.info(f"Town name: {town_name}")
+                
+                # Set up the output file path
+                output_file = os.path.join(week_folder, f"{load_number}_{load_date.strftime('%d-%m-%Y')}_{town_name}.xlsx")
+                logging.info(f"Output file path: {output_file}")
+                
+                # Copy template to output file
+                template_path = os.path.join(SCRIPT_DIR, "templates", "loadsheet.xlsx")
+                if not os.path.exists(template_path):
+                    logging.error(f"Template file not found at {template_path}")
+                    print(f"{Fore.RED}Template file not found at {template_path}{Style.RESET_ALL}")
+                    return False
+                
+                # Remove any existing lock files
+                lock_file = os.path.join(os.path.dirname(template_path), ".~lock.loadsheet.xlsx#")
+                if os.path.exists(lock_file):
+                    try:
+                        os.remove(lock_file)
+                        logging.info(f"Removed lock file: {lock_file}")
+                    except Exception as e:
+                        logging.warning(f"Could not remove lock file: {e}")
+                
+                import shutil
+                shutil.copy2(template_path, output_file)
+                logging.info(f"Copied template to output file")
+                
+                # Load the workbook without data_only=True
+                wb = load_workbook(output_file)
+                
+                # Verify the worksheet exists
+                if "Loadsheet" not in wb.sheetnames:
+                    logging.error("Worksheet 'Loadsheet' not found in template")
+                    print(f"{Fore.RED}Error: Worksheet 'Loadsheet' not found in template{Style.RESET_ALL}")
+                    return False
+                
+                ws = wb["Loadsheet"]
+                logging.info("Loaded workbook and worksheet")
+                
+                def safe_cell_write(cell_ref, value):
+                    """Safely write to a cell."""
+                    try:
+                        # Convert value to string and capitalize if it's not None
+                        cell_value = str(value).upper() if value is not None else ''
+                        ws[cell_ref] = cell_value
+                        logging.info(f"Successfully wrote value '{cell_value}' to cell {cell_ref}")
+                    except Exception as e:
+                        logging.error(f"Error writing to cell {cell_ref}: {e}")
+                
+                # Update header information
+                if collections:
+                    # Get the first collection date
+                    date_str = str(collections[0][3])
+                    try:
+                        if len(date_str) == 8:  # Ensure date string is in YYYYMMDD format
+                            date_obj = datetime.strptime(date_str, '%Y%m%d')
+                            formatted_date = date_obj.strftime('%d/%m/%Y')
+                            # Update collection date in header
+                            safe_cell_write('C6', formatted_date)  # Collection date in header
+                            logging.info(f"Wrote collection date {formatted_date} to C6")
+                    except ValueError as e:
+                        logging.warning(f"Error parsing collection date ({date_str}): {e}")
+                        print(f"{Fore.YELLOW}Warning: Error parsing collection date ({date_str}): {e}{Style.RESET_ALL}")
+                
+                if deliveries:
+                    # Get the first delivery date
+                    date_str = str(deliveries[0][3])
+                    try:
+                        if len(date_str) == 8:  # Ensure date string is in YYYYMMDD format
+                            date_obj = datetime.strptime(date_str, '%Y%m%d')
+                            formatted_date = date_obj.strftime('%d/%m/%Y')
+                            # Update delivery date in signature section
+                            safe_cell_write('H46', formatted_date)  # Delivery date in signature section
+                            logging.info(f"Wrote delivery date {formatted_date} to H46")
+                    except ValueError as e:
+                        logging.warning(f"Error parsing delivery date ({date_str}): {e}")
+                        print(f"{Fore.YELLOW}Warning: Error parsing delivery date ({date_str}): {e}{Style.RESET_ALL}")
+                
+                # Update collection date in signature section
+                if collections:
+                    date_str = str(collections[0][3])
+                    try:
+                        if len(date_str) == 8:  # Ensure date string is in YYYYMMDD format
+                            date_obj = datetime.strptime(date_str, '%Y%m%d')
+                            formatted_date = date_obj.strftime('%d/%m/%Y')
+                            safe_cell_write('C46', formatted_date)  # Collection date in signature section
+                            logging.info(f"Wrote collection date {formatted_date} to C46")
+                    except ValueError as e:
+                        logging.warning(f"Error parsing collection date ({date_str}): {e}")
+                        print(f"{Fore.YELLOW}Warning: Error parsing collection date ({date_str}): {e}{Style.RESET_ALL}")
+                
+                safe_cell_write('G6', str(load_number))  # Load Number
+                safe_cell_write('I6', str(load_number))  # Job ID (using load number)
+                logging.info(f"Wrote load number {load_number} to G6 and I6")
+                
+                # Update collection and delivery locations
+                if collections:
+                    # Create a set of unique collection locations
+                    unique_collections = {}
+                    for collection in collections:
+                        location = f"{collection[2]} - {collection[5]}" if collection[2] and collection[5] else collection[2] or ''
+                        if location not in unique_collections:
+                            unique_collections[location] = 1
+                        else:
+                            unique_collections[location] += 1
+                    
+                    # Join all locations with newlines
+                    collection_text = '\n'.join(unique_collections.keys())
+                    safe_cell_write('B9', collection_text)
+                    logging.info(f"Wrote collection locations to B9: {collection_text}")
+                
+                if deliveries:
+                    # Create a set of unique delivery locations
+                    unique_deliveries = {}
+                    for delivery in deliveries:
+                        location = f"{delivery[2]} - {delivery[5]}" if delivery[2] and delivery[5] else delivery[2] or ''
+                        if location not in unique_deliveries:
+                            unique_deliveries[location] = 1
+                        else:
+                            unique_deliveries[location] += 1
+                    
+                    # Join all locations with newlines
+                    delivery_text = '\n'.join(unique_deliveries.keys())
+                    safe_cell_write('F9', delivery_text)
+                    logging.info(f"Wrote delivery locations to F9: {delivery_text}")
+                
+                # Format vehicle data for summary
+                formatted_vehicles = []
+                for vehicle in vehicles:
+                    formatted_vehicles.append((
+                        str(vehicle[0] or ''),  # registration
+                        str(vehicle[1] or ''),  # model
+                        'N',  # offloaded (default)
+                        'Y',  # documents (default)
+                        str(vehicle[4] or 'Y'),  # spare keys
+                        str(vehicle[5] or 'Y'),  # extra (documents)
+                        str(vehicle[6] or '')   # notes
+                    ))
+                logging.info(f"Formatted {len(formatted_vehicles)} vehicles")
+                
+                # Update vehicle information
+                for i, vehicle in enumerate(formatted_vehicles[:8]):  # Handle up to 8 vehicles
+                    base_row = 11 + (i * 4)  # Starting from row 11, increment by 4 for each car
+                    logging.info(f"Writing vehicle {i+1} to rows {base_row}-{base_row+2}")
+                    
+                    # Car details - swapped registration and make & model, and capitalize all data
+                    safe_cell_write(f'B{base_row}', str(vehicle[1] or '').upper())  # Make & Model
+                    safe_cell_write(f'B{base_row + 2}', str(vehicle[0] or '').upper())  # Registration
+                    safe_cell_write(f'E{base_row - 1}', 'N')  # Offloaded (default)
+                    safe_cell_write(f'G{base_row - 1}', 'Y')  # Documents (default)
+                    safe_cell_write(f'I{base_row - 1}', str(vehicle[4] or 'Y').upper())  # Spare Keys
+                    if vehicle[6]:  # Notes
+                        safe_cell_write(f'C{base_row}', str(vehicle[6]).upper())
+                
+                # Generate and add load summary message
+                summary_message = self.generate_load_summary(formatted_vehicles)
+                safe_cell_write('C39', summary_message.upper())  # Capitalize summary message
+                logging.info(f"Wrote summary message to C39: {summary_message}")
+                
+                # Add signatures if enabled
+                if self.auto_signature:
+                    self.add_signatures(ws)
+                    logging.info("Added signatures to worksheet")
+                
+                # Save the workbook
+                wb.save(output_file)
+                logging.info(f"Saved workbook to {output_file}")
+                
+                # Verify the file exists and has content
+                if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+                    print(f"{Fore.GREEN}Loadsheet created successfully at {output_file}{Style.RESET_ALL}")
+                    return True
+                else:
+                    logging.error("File was not created or is empty")
+                    print(f"{Fore.RED}Error: File was not created or is empty{Style.RESET_ALL}")
+                    return False
+                
+            except Exception as e:
+                logging.error(f"Error during query execution: {e}", exc_info=True)
+                print(f"{Fore.RED}Error during query execution: {e}{Style.RESET_ALL}")
+                return False
+            finally:
+                if 'cursor' in locals():
+                    cursor.close()
+                if 'conn' in locals():
+                    conn.close()
+                if wb is not None:
+                    try:
+                        wb.close()
+                    except:
+                        pass
             
         except Exception as e:
+            logging.error(f"Error in create_loadsheet: {e}", exc_info=True)
             print(f"{Fore.RED}Error creating loadsheet: {e}{Style.RESET_ALL}")
-            logging.error(f"Error creating loadsheet: {e}", exc_info=True)
             return False
 
     def create_timesheet(self, selected_sunday):
         """Create a timesheet for the selected week."""
-        week_start = selected_sunday - timedelta(days=6)
-        start_date_str = week_start.strftime("%Y%m%d")
-        end_date_str = selected_sunday.strftime("%Y%m%d")
-        
         try:
-            conn = psycopg2.connect(**self.pg_config)
-            cursor = conn.cursor()
+            # Create directory for timesheets if it doesn't exist
+            week_folder = os.path.join(SCRIPT_DIR, "timesheets", selected_sunday.strftime("%Y%m%d"))
+            os.makedirs(week_folder, exist_ok=True)
             
-            # Get loads for the week
-            cursor.execute("""
-                SELECT 
-                    dwjdate,
-                    UPPER(dwjcust) AS contractor,
-                    dwjvehs AS car_count,
-                    UPPER(dwjtown) AS collection,
-                    (SELECT UPPER(dwjtown) 
-                     FROM dwjjob AS d 
-                     WHERE d.dwjdate = j.dwjdate 
-                     AND d.dwjtype = 'D' 
-                     LIMIT 1) AS destination
-                FROM dwjjob AS j
-                WHERE dwjdate BETWEEN %s AND %s 
-                AND dwjtype = 'C'
-                ORDER BY dwjdate
-            """, (start_date_str, end_date_str))
+            # Set up output file path
+            output_file = os.path.join(week_folder, f"timesheet_{selected_sunday.strftime('%Y%m%d')}.xlsx")
+            template_file = os.path.join(SCRIPT_DIR, "templates", "timesheet.xlsx")
             
-            loads = cursor.fetchall()
+            # Copy template to output file
+            import shutil
+            shutil.copy2(template_file, output_file)
             
-            if not loads:
-                print(f"{Fore.YELLOW}No loads found for this week.{Style.RESET_ALL}")
+            # Load the workbook
+            workbook = load_workbook(output_file)
+            ws = workbook["Timesheet"]
+            
+            # Helper functions
+            def safe_cell_write(cell_ref, value):
+                """Safely write a value to a cell, with error handling."""
+                try:
+                    # Convert value to string and capitalize if it's not None
+                    cell_value = str(value).upper() if value is not None else ''
+                    ws[cell_ref] = cell_value
+                    logging.info(f"Successfully wrote value '{cell_value}' to cell {cell_ref}")
+                except Exception as e:
+                    logging.error(f"Error writing to cell {cell_ref}: {e}")
+            
+            def format_time(time_str):
+                """Format time string for Excel."""
+                return time_str.strftime("%H:%M") if time_str else ""
+            
+            def format_total_hours(hours):
+                """Format total hours for Excel."""
+                return f"{float(hours):.2f}" if hours else "0.00"
+            
+            # Write week end date to cell E5
+            week_end_date = selected_sunday.strftime("%A %d/%m/%Y").upper()
+            safe_cell_write('E5', week_end_date)
+            logging.info(f"Wrote week end date to E5: {week_end_date}")
+            
+            # Calculate week start date
+            week_start = selected_sunday - timedelta(days=6)  # Monday
+            start_date_str = week_start.strftime("%Y%m%d")
+            end_date_str = selected_sunday.strftime("%Y%m%d")
+            
+            # Fetch loads and hours for the week
+            logging.info(f"Fetching data for week ending {selected_sunday.strftime('%Y-%m-%d')}")
+            try:
+                conn = psycopg2.connect(**self.pg_config)
+                cursor = conn.cursor()
+                print(f"{Fore.GREEN}Database connection successful.{Style.RESET_ALL}")
+            except Exception as e:
+                print(f"{Fore.RED}Database connection failed: {e}{Style.RESET_ALL}")
                 return False
-                
-            print(f"\n{Fore.CYAN}Week Summary:{Style.RESET_ALL}")
-            for load in loads:
-                date_str = datetime.strptime(str(load[0]), "%Y%m%d").strftime("%A %d-%m-%Y")
-                print(f"{Fore.WHITE}Date: {Fore.YELLOW}{date_str}{Style.RESET_ALL}")
-                print(f"{Fore.WHITE}Contractor: {Fore.YELLOW}{load[1]}{Style.RESET_ALL}")
-                print(f"{Fore.WHITE}Cars: {Fore.YELLOW}{load[2]}{Style.RESET_ALL}")
-                print(f"{Fore.WHITE}Collection: {Fore.YELLOW}{load[3]}{Style.RESET_ALL}")
-                print(f"{Fore.WHITE}Destination: {Fore.YELLOW}{load[4]}{Style.RESET_ALL}")
-                print()
             
-            confirm = input(f"{Fore.YELLOW}Create timesheet for this week? (y/n):{Style.RESET_ALL} ").strip().lower()
-            if confirm != 'y':
-                print(f"{Fore.YELLOW}Operation cancelled.{Style.RESET_ALL}")
-                return False
+            try:
+                # Get loads for the week with all required information
+                cursor.execute("""
+                    WITH load_dates AS (
+                        SELECT 
+                            j.dwjload,
+                            MAX(j.dwjdate) as load_date,
+                            j.dwjcust as contractor,
+                            STRING_AGG(DISTINCT CASE WHEN j.dwjtype = 'C' THEN j.dwjtown ELSE NULL END, ' | ') as collections,
+                            STRING_AGG(DISTINCT CASE WHEN j.dwjtype = 'D' THEN j.dwjtown ELSE NULL END, ' | ') as deliveries,
+                            COUNT(DISTINCT v.dwvvehref) as total_cars
+                        FROM public.dwjjob j
+                        LEFT JOIN public.dwvveh v ON j.dwjload = v.dwvload
+                        WHERE j.dwjdate BETWEEN %s AND %s
+                        GROUP BY j.dwjload, j.dwjcust
+                    )
+                    SELECT DISTINCT
+                        l.load_date,
+                        l.contractor,
+                        l.collections,
+                        l.deliveries,
+                        l.total_cars,
+                        h.start_time,
+                        h.finish_time,
+                        h.total_hours,
+                        l.dwjload
+                    FROM load_dates l
+                    LEFT JOIN public.hours h ON CAST(l.load_date AS TEXT) = TO_CHAR(h.work_date, 'YYYYMMDD')
+                    ORDER BY l.load_date, l.dwjload
+                """, (start_date_str, end_date_str))
                 
-            # TODO: Implement timesheet generation using template
-            print(f"{Fore.GREEN}Timesheet generation will be implemented here.{Style.RESET_ALL}")
-            return True
+                loads = cursor.fetchall()
+                
+                if not loads:
+                    print(f"{Fore.YELLOW}No loads found for this week.{Style.RESET_ALL}")
+                    return False
+                
+                # Log detailed information about each load
+                print(f"\n{Fore.CYAN}Detailed Load Information:{Style.RESET_ALL}")
+                for i, load in enumerate(loads, 1):
+                    date = datetime.strptime(str(load[0]), "%Y%m%d")
+                    day_name = date.strftime("%A").upper()
+                    print(f"\n{Fore.YELLOW}Load {i}:{Style.RESET_ALL}")
+                    print(f"Load Number: {load[8]}")
+                    print(f"Date: {date.strftime('%A %d-%m-%Y')}")
+                    print(f"Contractor: {load[1]}")
+                    print(f"Collections: {load[2]}")
+                    print(f"Deliveries: {load[3]}")
+                    print(f"Total Cars: {load[4]}")
+                    print(f"Start Time: {load[5]}")
+                    print(f"Finish Time: {load[6]}")
+                    print(f"Total Hours: {load[7]}")
+                    
+                    logging.info(f"Load {i}: Date={date.strftime('%A %d-%m-%Y')}, Contractor={load[1]}, Cars={load[4]}, Hours={load[7]}")
+                
+                # Organize loads by day of week
+                daily_loads = {}
+                for load in loads:
+                    date = datetime.strptime(str(load[0]), "%Y%m%d")
+                    day_name = date.strftime("%A").upper()
+                    if day_name not in daily_loads:
+                        daily_loads[day_name] = {
+                            'loads': [],
+                            'start_time': load[5],
+                            'finish_time': load[6],
+                            'total_hours': load[7]
+                        }
+                    daily_loads[day_name]['loads'].append(load)
+                
+                logging.info(f"Organized loads by day: {list(daily_loads.keys())}")
+                
+                # Process each day's loads
+                day_row_mapping = {
+                    'MONDAY': {'start': 8, 'end': 10},
+                    'TUESDAY': {'start': 11, 'end': 13},
+                    'WEDNESDAY': {'start': 14, 'end': 16},
+                    'THURSDAY': {'start': 17, 'end': 19},
+                    'FRIDAY': {'start': 20, 'end': 22},
+                    'SATURDAY': {'start': 23, 'end': 25},
+                    'SUNDAY': {'start': 26, 'end': 28}
+                }
+                
+                overflow_row = 29
+                has_overflow = False
+                
+                # Define day order
+                day_order = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']
+                
+                for day in day_order:
+                    if day in daily_loads:
+                        day_data = daily_loads[day]
+                        rows = day_row_mapping[day]
+                        current_row = rows['start']
+                        
+                        logging.info(f"Processing {day}: {len(day_data['loads'])} loads")
+                        
+                        # Write loads for the day
+                        for load in day_data['loads']:
+                            if current_row <= rows['end']:
+                                # Write contractor name
+                                safe_cell_write(f'C{current_row}', load[1])
+                                
+                                # Write number of cars
+                                safe_cell_write(f'D{current_row}', load[4])
+                                
+                                # Write collection towns
+                                safe_cell_write(f'E{current_row}', load[2] or '')
+                                
+                                # Write delivery towns
+                                safe_cell_write(f'F{current_row}', load[3] or '')
+                                
+                                logging.info(f"Wrote load data to row {current_row}: Contractor={load[1]}, Cars={load[4]}")
+                                
+                                current_row += 1
+                            else:
+                                # Mark that we have overflow loads
+                                has_overflow = True
+                                # Write overflow loads
+                                safe_cell_write(f'C{overflow_row}', load[1])
+                                safe_cell_write(f'D{overflow_row}', load[4])
+                                safe_cell_write(f'E{overflow_row}', load[2] or '')
+                                safe_cell_write(f'F{overflow_row}', load[3] or '')
+                                logging.info(f"Wrote overflow load to row {overflow_row}")
+                                overflow_row += 1
+                        
+                        # Write hours for the day if available
+                        if day_data['start_time'] and day_data['finish_time']:
+                            # Write hours in the first row of each day
+                            safe_cell_write(f'H{rows["start"]}', format_time(day_data['start_time']))
+                            safe_cell_write(f'I{rows["start"]}', format_time(day_data['finish_time']))
+                            safe_cell_write(f'J{rows["start"]}', format_total_hours(day_data['total_hours']))
+                            logging.info(f"Wrote hours for {day}: Start={day_data['start_time']}, Finish={day_data['finish_time']}, Total={day_data['total_hours']}")
+                
+                # Calculate and write total hours
+                total_hours = sum(float(day_data['total_hours'] or 0) for day_data in daily_loads.values())
+                safe_cell_write('J29', format_total_hours(total_hours))
+                logging.info(f"Wrote total hours: {total_hours}")
+                
+                # Save the workbook
+                workbook.save(output_file)
+                logging.info(f"Successfully saved timesheet to {output_file}")
+                
+                # Verify the file was saved correctly
+                if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+                    print(f"{Fore.GREEN}Timesheet created successfully at {output_file}{Style.RESET_ALL}")
+                    return True
+                else:
+                    print(f"{Fore.RED}Error: Timesheet file was not created or is empty{Style.RESET_ALL}")
+                    return False
+            finally:
+                if 'cursor' in locals():
+                    cursor.close()
+                if 'conn' in locals():
+                    conn.close()
             
         except Exception as e:
-            logging.error(f"Error creating timesheet: {e}")
-            print(f"{Fore.RED}Error creating timesheet: {e}{Style.RESET_ALL}")
+            logging.error(f"Error creating timesheet: {str(e)}")
+            print(f"{Fore.RED}Error creating timesheet: {str(e)}{Style.RESET_ALL}")
             return False
         finally:
             if 'cursor' in locals():
@@ -673,6 +1091,10 @@ class PaperworkManager:
     def add_signatures(self, ws):
         """Add signatures to the loadsheet with fine-tuned positioning."""
         try:
+            # Only add signatures to loadsheets
+            if ws.title != "Loadsheet":
+                return
+                
             # Get signature files
             sig1_dir = os.path.join(SCRIPT_DIR, "signature", "sig1")
             sig2_dir = os.path.join(SCRIPT_DIR, "signature", "sig2")
@@ -706,12 +1128,16 @@ class PaperworkManager:
             img2.width = int(base_width * scale_factor)
             img2.height = int(base_height * scale_factor)
             
-            # Get cell positions and dimensions
-            x1, y1 = self.get_cell_position(ws, 'C44')
-            x2, y2 = self.get_cell_position(ws, 'H44')
+            # Get cell positions for loadsheet
+            sig1_cell = 'C44'
+            sig2_cell = 'H44'
             
-            width1, height1 = self.get_cell_dimensions(ws, 'C44')
-            width2, height2 = self.get_cell_dimensions(ws, 'H44')
+            # Get cell positions and dimensions
+            x1, y1 = self.get_cell_position(ws, sig1_cell)
+            x2, y2 = self.get_cell_position(ws, sig2_cell)
+            
+            width1, height1 = self.get_cell_dimensions(ws, sig1_cell)
+            width2, height2 = self.get_cell_dimensions(ws, sig2_cell)
             
             # Randomly choose a vertical offset mode (4-7)
             vertical_mode = random.randint(4, 7)
@@ -1041,9 +1467,13 @@ class PaperworkManager:
                         """Safely write to a cell."""
                         try:
                             cell = ws[cell_ref]
-                            cell.value = value
+                            # If the cell is a merged cell, get its parent cell
+                            if hasattr(cell, 'parent') and cell.parent is not None:
+                                cell = cell.parent
+                            # Convert value to string and capitalize if it's not None
+                            cell.value = str(value).upper() if value is not None else ''
                         except Exception as e:
-                            print(f"{Fore.YELLOW}Warning: Could not write to cell {cell_ref}: {e}{Style.RESET_ALL}")
+                            logging.error(f"Error writing to cell {cell_ref}: {e}")
                     
                     # Update header information
                     if collections:
@@ -1118,8 +1548,8 @@ class PaperworkManager:
                         base_row = 11 + (i * 4)  # Starting from row 11, increment by 4 for each car
                         
                         # Car details - swapped registration and make & model, and capitalize all data
-                        safe_cell_write(f'B{base_row}', str(vehicle[1] or '').upper())  # Registration (now in B column)
-                        safe_cell_write(f'B{base_row + 2}', str(vehicle[0] or '').upper())  # Make & Model (now in B+2)
+                        safe_cell_write(f'B{base_row}', str(vehicle[1] or '').upper())  # Make & Model
+                        safe_cell_write(f'B{base_row + 2}', str(vehicle[0] or '').upper())  # Registration
                         safe_cell_write(f'E{base_row - 1}', 'N')  # Offloaded (default)
                         safe_cell_write(f'G{base_row - 1}', 'Y')  # Documents (default)
                         safe_cell_write(f'I{base_row - 1}', str(vehicle[4] or 'Y').upper())  # Spare Keys
@@ -1374,11 +1804,201 @@ class PaperworkManager:
         print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}3.{Style.RESET_ALL} {Fore.CYAN}Create All Paperwork            {Fore.YELLOW}│{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}4.{Style.RESET_ALL} {Fore.CYAN}Test Loadsheet                 {Fore.YELLOW}│{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}5.{Style.RESET_ALL} {Fore.CYAN}Test Load Details              {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}6.{Style.RESET_ALL} {Fore.CYAN}Toggle Auto Signature          {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}7.{Style.RESET_ALL} {Fore.CYAN}Exit                         {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}6.{Style.RESET_ALL} {Fore.CYAN}Test Timesheet                 {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}7.{Style.RESET_ALL} {Fore.CYAN}Toggle Auto Signature          {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}8.{Style.RESET_ALL} {Fore.CYAN}Exit                         {Fore.YELLOW}│{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}└──────────────────────────────────────┘{Style.RESET_ALL}")
         
-        print(f"{Fore.CYAN}Enter your choice (1-7):{Style.RESET_ALL} ", end="")
+        print(f"{Fore.CYAN}Enter your choice (1-8):{Style.RESET_ALL} ", end="")
+
+    def test_timesheet(self):
+        """Test timesheet generation with debug information."""
+        try:
+            # Check required files first
+            if not self.check_required_files():
+                print(f"{Fore.RED}Please ensure all required files are in place before proceeding.{Style.RESET_ALL}")
+                return False
+
+            # Get list of recent Sundays
+            selected_sunday = self.select_week()
+            if not selected_sunday:
+                return False
+                
+            # Calculate week start (Monday)
+            week_start = selected_sunday - timedelta(days=6)
+            
+            print(f"\n{Fore.CYAN}Selected week:{Style.RESET_ALL}")
+            print(f"{Fore.WHITE}Week Start (Monday): {Fore.YELLOW}{week_start.strftime('%A %d-%m-%Y')}{Style.RESET_ALL}")
+            print(f"{Fore.WHITE}Week End (Sunday): {Fore.YELLOW}{selected_sunday.strftime('%A %d-%m-%Y')}{Style.RESET_ALL}")
+            
+            # Get loads and hours for the week
+            try:
+                conn = psycopg2.connect(**self.pg_config)
+                cursor = conn.cursor()
+                print(f"{Fore.GREEN}Database connection successful.{Style.RESET_ALL}")
+            except Exception as e:
+                print(f"{Fore.RED}Database connection failed: {e}{Style.RESET_ALL}")
+                return False
+            
+            try:
+                # Get loads for the week with all required information
+                cursor.execute("""
+                    WITH load_dates AS (
+                        SELECT 
+                            j.dwjload,
+                            MAX(j.dwjdate) as load_date,
+                            j.dwjcust as contractor,
+                            STRING_AGG(DISTINCT CASE WHEN j.dwjtype = 'C' THEN j.dwjtown ELSE NULL END, ' | ') as collections,
+                            STRING_AGG(DISTINCT CASE WHEN j.dwjtype = 'D' THEN j.dwjtown ELSE NULL END, ' | ') as deliveries,
+                            COUNT(DISTINCT v.dwvvehref) as total_cars
+                        FROM public.dwjjob j
+                        LEFT JOIN public.dwvveh v ON j.dwjload = v.dwvload
+                        WHERE j.dwjdate BETWEEN %s AND %s
+                        GROUP BY j.dwjload, j.dwjcust
+                    )
+                    SELECT DISTINCT
+                        l.load_date,
+                        l.contractor,
+                        l.collections,
+                        l.deliveries,
+                        l.total_cars,
+                        h.start_time,
+                        h.finish_time,
+                        h.total_hours,
+                        l.dwjload
+                    FROM load_dates l
+                    LEFT JOIN public.hours h ON CAST(l.load_date AS TEXT) = TO_CHAR(h.work_date, 'YYYYMMDD')
+                    ORDER BY l.load_date, l.dwjload
+                """, (week_start.strftime("%Y%m%d"), selected_sunday.strftime("%Y%m%d")))
+                
+                loads = cursor.fetchall()
+                
+                if not loads:
+                    print(f"{Fore.YELLOW}No loads found for this week.{Style.RESET_ALL}")
+                    return False
+                
+                # Log detailed information about each load
+                print(f"\n{Fore.CYAN}Detailed Load Information:{Style.RESET_ALL}")
+                for i, load in enumerate(loads, 1):
+                    date = datetime.strptime(str(load[0]), "%Y%m%d")
+                    day_name = date.strftime("%A").upper()
+                    print(f"\n{Fore.YELLOW}Load {i}:{Style.RESET_ALL}")
+                    print(f"Load Number: {load[8]}")
+                    print(f"Date: {date.strftime('%A %d-%m-%Y')}")
+                    print(f"Contractor: {load[1]}")
+                    print(f"Collections: {load[2]}")
+                    print(f"Deliveries: {load[3]}")
+                    print(f"Total Cars: {load[4]}")
+                    print(f"Start Time: {load[5]}")
+                    print(f"Finish Time: {load[6]}")
+                    print(f"Total Hours: {load[7]}")
+                    
+                    logging.info(f"Load {i}: Date={date.strftime('%A %d-%m-%Y')}, Contractor={load[1]}, Cars={load[4]}, Hours={load[7]}")
+                
+                # Organize loads by day of week
+                daily_loads = {}
+                for load in loads:
+                    date = datetime.strptime(str(load[0]), "%Y%m%d")
+                    day_name = date.strftime("%A").upper()
+                    if day_name not in daily_loads:
+                        daily_loads[day_name] = {
+                            'loads': [],
+                            'start_time': load[5],
+                            'finish_time': load[6],
+                            'total_hours': load[7]
+                        }
+                    daily_loads[day_name]['loads'].append(load)
+                
+                logging.info(f"Organized loads by day: {list(daily_loads.keys())}")
+                
+                # Process each day's loads
+                day_row_mapping = {
+                    'MONDAY': {'start': 8, 'end': 10},
+                    'TUESDAY': {'start': 11, 'end': 13},
+                    'WEDNESDAY': {'start': 14, 'end': 16},
+                    'THURSDAY': {'start': 17, 'end': 19},
+                    'FRIDAY': {'start': 20, 'end': 22},
+                    'SATURDAY': {'start': 23, 'end': 25},
+                    'SUNDAY': {'start': 26, 'end': 28}
+                }
+                
+                overflow_row = 29
+                has_overflow = False
+                
+                # Define day order
+                day_order = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']
+                
+                for day in day_order:
+                    if day in daily_loads:
+                        day_data = daily_loads[day]
+                        rows = day_row_mapping[day]
+                        current_row = rows['start']
+                        
+                        logging.info(f"Processing {day}: {len(day_data['loads'])} loads")
+                        
+                        # Write loads for the day
+                        for load in day_data['loads']:
+                            if current_row <= rows['end']:
+                                # Write contractor name
+                                safe_cell_write(f'C{current_row}', load[1])
+                                
+                                # Write number of cars
+                                safe_cell_write(f'D{current_row}', load[4])
+                                
+                                # Write collection towns
+                                safe_cell_write(f'E{current_row}', load[2] or '')
+                                
+                                # Write delivery towns
+                                safe_cell_write(f'F{current_row}', load[3] or '')
+                                
+                                logging.info(f"Wrote load data to row {current_row}: Contractor={load[1]}, Cars={load[4]}")
+                                
+                                current_row += 1
+                            else:
+                                # Mark that we have overflow loads
+                                has_overflow = True
+                                # Write overflow loads
+                                safe_cell_write(f'C{overflow_row}', load[1])
+                                safe_cell_write(f'D{overflow_row}', load[4])
+                                safe_cell_write(f'E{overflow_row}', load[2] or '')
+                                safe_cell_write(f'F{overflow_row}', load[3] or '')
+                                logging.info(f"Wrote overflow load to row {overflow_row}")
+                                overflow_row += 1
+                        
+                        # Write hours for the day if available
+                        if day_data['start_time'] and day_data['finish_time']:
+                            # Write hours in the first row of each day
+                            safe_cell_write(f'H{rows["start"]}', format_time(day_data['start_time']))
+                            safe_cell_write(f'I{rows["start"]}', format_time(day_data['finish_time']))
+                            safe_cell_write(f'J{rows["start"]}', format_total_hours(day_data['total_hours']))
+                            logging.info(f"Wrote hours for {day}: Start={day_data['start_time']}, Finish={day_data['finish_time']}, Total={day_data['total_hours']}")
+                
+                # Calculate and write total hours
+                total_hours = sum(float(day_data['total_hours'] or 0) for day_data in daily_loads.values())
+                safe_cell_write('J29', format_total_hours(total_hours))
+                logging.info(f"Wrote total hours: {total_hours}")
+                
+                # Save the workbook
+                workbook.save(output_file)
+                logging.info(f"Successfully saved timesheet to {output_file}")
+                
+                # Verify the file was saved correctly
+                if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+                    print(f"{Fore.GREEN}Timesheet created successfully at {output_file}{Style.RESET_ALL}")
+                    return True
+                else:
+                    print(f"{Fore.RED}Error: Timesheet file was not created or is empty{Style.RESET_ALL}")
+                    return False
+            finally:
+                if 'cursor' in locals():
+                    cursor.close()
+                if 'conn' in locals():
+                    conn.close()
+            
+        except Exception as e:
+            logging.error(f"Error in test_timesheet: {e}", exc_info=True)
+            print(f"{Fore.RED}Error generating test timesheet: {e}{Style.RESET_ALL}")
+            return False
 
     def run(self):
         """Run the main application loop."""
@@ -1426,9 +2046,12 @@ class PaperworkManager:
                 self.test_load_details()
                 
             elif choice == '6':
-                self.toggle_auto_signature()
+                self.test_timesheet()
                 
             elif choice == '7':
+                self.toggle_auto_signature()
+                
+            elif choice == '8':
                 print(f"{Fore.GREEN}Exiting...{Style.RESET_ALL}")
                 break
                 

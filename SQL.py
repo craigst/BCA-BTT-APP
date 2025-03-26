@@ -208,13 +208,13 @@ class TimesheetManager:
                     print(f"{Fore.YELLOW}Entry already exists for this date. Updating...{Style.RESET_ALL}")
                     cursor.execute("""
                         UPDATE public.hours 
-                        SET start_time = %s, finish_time = %s, updated_at = CURRENT_TIMESTAMP
+                        SET start_time = %s::time(0), finish_time = %s::time(0), updated_at = CURRENT_TIMESTAMP
                         WHERE work_date = %s
                     """, (f"{start_hour:02d}:00", f"{finish_hour:02d}:00", selected_date.date()))
                 else:
                     cursor.execute("""
                         INSERT INTO public.hours (work_date, start_time, finish_time)
-                        VALUES (%s, %s, %s)
+                        VALUES (%s, %s::time(0), %s::time(0))
                     """, (selected_date.date(), f"{start_hour:02d}:00", f"{finish_hour:02d}:00"))
                 
                 conn.commit()
@@ -414,7 +414,7 @@ class TimesheetManager:
                 # Update database
                 cursor.execute("""
                     UPDATE public.hours 
-                    SET start_time = %s, finish_time = %s, updated_at = CURRENT_TIMESTAMP
+                    SET start_time = %s::time(0), finish_time = %s::time(0), updated_at = CURRENT_TIMESTAMP
                     WHERE work_date = %s
                 """, (f"{start_hour:02d}:00", f"{finish_hour:02d}:00", selected_date.date()))
                 
