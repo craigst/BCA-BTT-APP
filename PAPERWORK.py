@@ -50,7 +50,7 @@ class SignatureConfig:
     """Configuration for signature placement and appearance."""
     def __init__(self):
         # Base scale (1.0 = original size)
-        self.scale = 1.0  # 20% larger than original
+        self.scale = 1.2  # 20% larger than original
         
         # Fine-tuning offsets (in pixels)
         self.sig1_offset_x = 0  # Adjust left/right (0 = centered)
@@ -986,32 +986,75 @@ class PaperworkManager:
 
     def create_all_paperwork(self, selected_sunday):
         """Create all loadsheets and timesheet for the selected week."""
-        loads = self.get_loads_for_week(selected_sunday)
-        if not loads:
-            print(f"{Fore.YELLOW}No loads found for this week.{Style.RESET_ALL}")
-            return False
+        try:
+            # Calculate week start (Monday)
+            week_start = selected_sunday - timedelta(days=6)
+            week_end = selected_sunday
             
-        print(f"\n{Fore.CYAN}Found {len(loads)} loads for this week:{Style.RESET_ALL}")
-        for load in loads:
-            print(f"{Fore.WHITE}Load: {Fore.YELLOW}{load[0]}{Style.RESET_ALL}")
+            print(f"\n{Fore.CYAN}Creating paperwork for week:{Style.RESET_ALL}")
+            print(f"{Fore.WHITE}Week Start (Monday): {Fore.YELLOW}{week_start.strftime('%A %d-%m-%Y')}{Style.RESET_ALL}")
+            print(f"{Fore.WHITE}Week End (Sunday): {Fore.YELLOW}{week_end.strftime('%A %d-%m-%Y')}{Style.RESET_ALL}")
             
-        confirm = input(f"\n{Fore.YELLOW}Create all paperwork for this week? (y/n):{Style.RESET_ALL} ").strip().lower()
-        if confirm != 'y':
-            print(f"{Fore.YELLOW}Operation cancelled.{Style.RESET_ALL}")
-            return False
-            
-        # Create timesheet first
-        if not self.create_timesheet(selected_sunday):
-            return False
-            
-        # Create loadsheets
-        for load in loads:
-            if not self.create_loadsheet(load[0]):
-                print(f"{Fore.YELLOW}Skipping remaining loads.{Style.RESET_ALL}")
+            # Get all loads for the week
+            loads = self.get_loads_for_week(selected_sunday)
+            if not loads:
+                print(f"{Fore.YELLOW}No loads found for this week.{Style.RESET_ALL}")
                 return False
                 
-        print(f"{Fore.GREEN}All paperwork created successfully!{Style.RESET_ALL}")
-        return True
+            print(f"\n{Fore.CYAN}Found {len(loads)} loads for this week:{Style.RESET_ALL}")
+            for load in loads:
+                print(f"{Fore.WHITE}Load: {Fore.YELLOW}{load[0]}{Style.RESET_ALL}")
+                
+            confirm = input(f"\n{Fore.YELLOW}Create all paperwork for this week? (y/n):{Style.RESET_ALL} ").strip().lower()
+            if confirm != 'y':
+                print(f"{Fore.YELLOW}Operation cancelled.{Style.RESET_ALL}")
+                return False
+            
+            # Create base directories
+            loadsheets_dir = os.path.join(SCRIPT_DIR, "loadsheets")
+            timesheets_dir = os.path.join(SCRIPT_DIR, "timesheets")
+            os.makedirs(loadsheets_dir, exist_ok=True)
+            os.makedirs(timesheets_dir, exist_ok=True)
+            
+            # Create week-specific directories
+            week_folder = os.path.join(loadsheets_dir, week_end.strftime("%d-%m-%Y"))
+            timesheet_folder = os.path.join(timesheets_dir, week_end.strftime("%Y%m%d"))
+            os.makedirs(week_folder, exist_ok=True)
+            os.makedirs(timesheet_folder, exist_ok=True)
+            
+            print(f"\n{Fore.CYAN}Creating paperwork in:{Style.RESET_ALL}")
+            print(f"{Fore.WHITE}Loadsheets: {Fore.YELLOW}{week_folder}{Style.RESET_ALL}")
+            print(f"{Fore.WHITE}Timesheet: {Fore.YELLOW}{timesheet_folder}{Style.RESET_ALL}")
+            
+            # Create timesheet first
+            print(f"\n{Fore.CYAN}Creating timesheet...{Style.RESET_ALL}")
+            if not self.create_timesheet(selected_sunday):
+                print(f"{Fore.RED}Failed to create timesheet. Stopping paperwork creation.{Style.RESET_ALL}")
+                return False
+            
+            # Create loadsheets for each load
+            print(f"\n{Fore.CYAN}Creating loadsheets...{Style.RESET_ALL}")
+            for i, load in enumerate(loads, 1):
+                print(f"\n{Fore.YELLOW}Processing load {i} of {len(loads)}: {load[0]}{Style.RESET_ALL}")
+                
+                try:
+                    # Use the existing create_loadsheet method
+                    if not self.create_loadsheet(load[0]):
+                        print(f"{Fore.RED}Failed to create loadsheet for load {load[0]}. Skipping...{Style.RESET_ALL}")
+                        continue
+                    
+                except Exception as e:
+                    print(f"{Fore.RED}Error creating loadsheet for load {load[0]}: {e}{Style.RESET_ALL}")
+                    logging.error(f"Error creating loadsheet for load {load[0]}: {e}", exc_info=True)
+                    continue
+            
+            print(f"\n{Fore.GREEN}All paperwork created successfully!{Style.RESET_ALL}")
+            return True
+            
+        except Exception as e:
+            logging.error(f"Error in create_all_paperwork: {e}", exc_info=True)
+            print(f"{Fore.RED}Error creating paperwork: {e}{Style.RESET_ALL}")
+            return False
 
     def check_required_files(self):
         """Check if all required files and directories exist."""

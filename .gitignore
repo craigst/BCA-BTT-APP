@@ -62,5 +62,4 @@ local_settings.py
 /templates/
 /loadsheets/
 /test/
-# SQL configuration files
-sql.ini 
+/ollama-webui/
