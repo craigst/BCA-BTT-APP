@@ -13,7 +13,7 @@ db/
 *.db
 *.sqlite
 *.sqlite3
-
+*.pdf
 # Configuration files
 *.ini
 *.conf
