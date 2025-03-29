@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+3#!/usr/bin/env python3
 import os
 import sys
 from datetime import datetime, timedelta
@@ -104,6 +104,22 @@ class TimesheetManager:
                     created_at timestamp DEFAULT CURRENT_TIMESTAMP,
                     updated_at timestamp DEFAULT CURRENT_TIMESTAMP
                 )
+            """)
+            
+            # Add updated_at column if it doesn't exist
+            cursor.execute("""
+                DO $$ 
+                BEGIN 
+                    IF NOT EXISTS (
+                        SELECT 1 
+                        FROM information_schema.columns 
+                        WHERE table_name = 'extracarinfo' 
+                        AND column_name = 'updated_at'
+                    ) THEN
+                        ALTER TABLE public.extracarinfo 
+                        ADD COLUMN updated_at timestamp DEFAULT CURRENT_TIMESTAMP;
+                    END IF;
+                END $$;
             """)
             
             # Create index on carreg
@@ -754,14 +770,14 @@ class TimesheetManager:
                 conn.close()
 
     def add_missing_cars(self):
-        """Add missing cars to extracarinfo table."""
+        """Add missing cars to extracarinfo table with a clean interface."""
         try:
             conn = psycopg2.connect(**self.pg_config)
             cursor = conn.cursor()
             
             # Get all vehicles from dwvveh that aren't in extracarinfo
             cursor.execute("""
-                SELECT v.dwvkey, v.dwvvehref
+                SELECT v.dwvkey, v.dwvvehref, v.dwvmoddes
                 FROM public.dwvveh v
                 LEFT JOIN public.extracarinfo e ON v.dwvkey = e.idkey
                 WHERE e.idkey IS NULL
@@ -775,23 +791,92 @@ class TimesheetManager:
                 return
             
             print(f"\n{Fore.CYAN}Found {len(missing_cars)} missing cars:{Style.RESET_ALL}")
-            for i, (key, reg) in enumerate(missing_cars, 1):
-                print(f"{Fore.WHITE}{i}. {Fore.YELLOW}{reg}{Style.RESET_ALL}")
+            print(f"{Fore.WHITE}{'Registration':<15} | {'Model':<30}{Style.RESET_ALL}")
+            print("-" * 50)
             
-            confirm = input(f"\n{Fore.YELLOW}Add these cars to extracarinfo? (y/n):{Style.RESET_ALL} ").strip().lower()
-            if confirm != 'y':
+            for key, reg, model in missing_cars:
+                print(f"{Fore.YELLOW}{reg:<15} | {Fore.WHITE}{model:<30}{Style.RESET_ALL}")
+            
+            print(f"\n{Fore.YELLOW}Options:{Style.RESET_ALL}")
+            print(f"{Fore.WHITE}1. Add All Cars{Style.RESET_ALL}")
+            print(f"{Fore.WHITE}2. Add Cars Individually{Style.RESET_ALL}")
+            print(f"{Fore.WHITE}3. Cancel{Style.RESET_ALL}")
+            
+            choice = input(f"\n{Fore.CYAN}Enter your choice (1-3):{Style.RESET_ALL} ").strip()
+            
+            if choice == '1':
+                confirm = input(f"{Fore.YELLOW}Add all {len(missing_cars)} cars with default settings? (y/n):{Style.RESET_ALL} ").strip().lower()
+                if confirm != 'y':
+                    print(f"{Fore.YELLOW}Operation cancelled.{Style.RESET_ALL}")
+                    return
+                
+                # Insert all missing cars with default values
+                for key, reg, model in missing_cars:
+                    cursor.execute("""
+                        INSERT INTO public.extracarinfo (idkey, carreg, sparekeys, extra, carnotes, photos)
+                        VALUES (%s, %s, 'Y', 'Y', '', '{}')
+                    """, (key, reg))
+                
+                conn.commit()
+                print(f"{Fore.GREEN}Successfully added {len(missing_cars)} cars to extracarinfo.{Style.RESET_ALL}")
+            
+            elif choice == '2':
+                while True:
+                    print(f"\n{Fore.CYAN}Select a car to add:{Style.RESET_ALL}")
+                    for i, (key, reg, model) in enumerate(missing_cars, 1):
+                        print(f"{Fore.WHITE}{i}. {Fore.YELLOW}{reg} - {model}{Style.RESET_ALL}")
+                    
+                    print(f"\n{Fore.WHITE}{len(missing_cars) + 1}. Done{Style.RESET_ALL}")
+                    
+                    car_choice = input(f"\n{Fore.CYAN}Enter car number (1-{len(missing_cars) + 1}):{Style.RESET_ALL} ").strip()
+                    try:
+                        car_idx = int(car_choice) - 1
+                        if car_idx == len(missing_cars):
+                            break
+                        if not (0 <= car_idx < len(missing_cars)):
+                            print(f"{Fore.RED}Invalid selection.{Style.RESET_ALL}")
+                            continue
+                        
+                        key, reg, model = missing_cars[car_idx]
+                        
+                        print(f"\n{Fore.CYAN}Adding {reg} - {model}:{Style.RESET_ALL}")
+                        
+                        # Get spare keys status
+                        while True:
+                            sparekeys = input(f"{Fore.CYAN}Has spare keys? (Y/N):{Style.RESET_ALL} ").strip().upper()
+                            if sparekeys in ['Y', 'N']:
+                                break
+                            print(f"{Fore.RED}Please enter Y or N.{Style.RESET_ALL}")
+                        
+                        # Get documents status
+                        while True:
+                            extra = input(f"{Fore.CYAN}Has documents? (Y/N):{Style.RESET_ALL} ").strip().upper()
+                            if extra in ['Y', 'N']:
+                                break
+                            print(f"{Fore.RED}Please enter Y or N.{Style.RESET_ALL}")
+                        
+                        # Get notes
+                        notes = input(f"{Fore.CYAN}Enter notes (optional):{Style.RESET_ALL} ").strip()
+                        
+                        # Insert car with provided information
+                        cursor.execute("""
+                            INSERT INTO public.extracarinfo (idkey, carreg, sparekeys, extra, carnotes, photos)
+                            VALUES (%s, %s, %s, %s, %s, '{}')
+                        """, (key, reg, sparekeys, extra, notes))
+                        
+                        conn.commit()
+                        print(f"{Fore.GREEN}Successfully added {reg} to extracarinfo.{Style.RESET_ALL}")
+                        
+                        # Remove the car from missing_cars list
+                        missing_cars.pop(car_idx)
+                        
+                    except ValueError:
+                        print(f"{Fore.RED}Invalid input.{Style.RESET_ALL}")
+            
+            elif choice == '3':
                 print(f"{Fore.YELLOW}Operation cancelled.{Style.RESET_ALL}")
-                return
-            
-            # Insert missing cars with explicit default values
-            for key, reg in missing_cars:
-                cursor.execute("""
-                    INSERT INTO public.extracarinfo (idkey, carreg, sparekeys, extra, carnotes, photos)
-                    VALUES (%s, %s, 'Y', 'Y', '', '{}')
-                """, (key, reg))
-            
-            conn.commit()
-            print(f"{Fore.GREEN}Successfully added {len(missing_cars)} cars to extracarinfo.{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.RED}Invalid choice.{Style.RESET_ALL}")
             
         except Exception as e:
             logging.error(f"Error adding missing cars: {e}")
@@ -808,7 +893,6 @@ class TimesheetManager:
             # Get list of recent Sundays
             today = datetime.now()
             current_weekday = today.weekday()
-            # Calculate last Sunday (weekday 6 is Sunday)
             days_to_last_sunday = (current_weekday + 1) % 7
             last_sunday = today - timedelta(days=days_to_last_sunday)
             
@@ -820,15 +904,6 @@ class TimesheetManager:
             next_sunday = last_sunday + timedelta(weeks=1)
             if next_sunday.strftime("%A %d-%m-%Y") not in sundays:
                 sundays.insert(0, next_sunday.strftime("%A %d-%m-%Y"))
-            
-            # Validate that we have actual Sundays
-            for date_str in sundays:
-                date = datetime.strptime(date_str, "%A %d-%m-%Y")
-                if date.weekday() != 6:  # 6 is Sunday
-                    logging.error(f"Invalid Sunday date found: {date_str} (weekday: {date.weekday()})")
-                    raise ValueError(f"Invalid Sunday date: {date_str}")
-            
-            logging.info(f"Available Sundays: {sundays}")
             
             print(f"\n{Fore.CYAN}Select week end date (Sunday):{Style.RESET_ALL}")
             for i, sunday in enumerate(sundays, 1):
@@ -905,12 +980,16 @@ class TimesheetManager:
                         return
                     
                     while True:
+                        # Clear screen and show menu
+                        os.system('cls' if os.name == 'nt' else 'clear')
                         print(f"\n{Fore.CYAN}Vehicles in Load {selected_load}:{Style.RESET_ALL}")
+                        print(f"{Fore.WHITE}{'Registration':<12} | {'Model':<30} | {'Keys':<4} | {'Docs':<4}{Style.RESET_ALL}")
+                        print("-" * 60)
+                        
                         for i, (key, reg, model, sparekeys, extra, notes) in enumerate(vehicles, 1):
-                            print(f"{Fore.WHITE}{i}. {Fore.YELLOW}{reg} - {model}{Style.RESET_ALL}")
-                            print(f"   {Fore.CYAN}Spare Keys: {sparekeys} | Documents: {extra}{Style.RESET_ALL}")
+                            print(f"{Fore.WHITE}{i:2d}. {Fore.YELLOW}{reg:<10} | {Fore.WHITE}{model:<30} | {Fore.GREEN}{sparekeys:<4} | {Fore.GREEN}{extra:<4}{Style.RESET_ALL}")
                             if notes:
-                                print(f"   {Fore.CYAN}Notes: {notes}{Style.RESET_ALL}")
+                                print(f"    {Fore.CYAN}Notes: {notes}{Style.RESET_ALL}")
                         
                         print(f"\n{Fore.YELLOW}Options:{Style.RESET_ALL}")
                         print(f"{Fore.WHITE}1. Edit Vehicle{Style.RESET_ALL}")
@@ -928,28 +1007,37 @@ class TimesheetManager:
                                 
                                 key, reg, model, sparekeys, extra, notes = vehicles[vehicle_idx]
                                 
+                                # Clear screen and show edit menu
+                                os.system('cls' if os.name == 'nt' else 'clear')
                                 print(f"\n{Fore.CYAN}Editing {reg} - {model}:{Style.RESET_ALL}")
-                                print(f"{Fore.WHITE}Current Spare Keys: {Fore.YELLOW}{sparekeys}{Style.RESET_ALL}")
-                                print(f"{Fore.WHITE}Current Documents: {Fore.YELLOW}{extra}{Style.RESET_ALL}")
+                                print(f"{Fore.WHITE}Current Settings:{Style.RESET_ALL}")
+                                print(f"{Fore.YELLOW}Spare Keys: {sparekeys}{Style.RESET_ALL}")
+                                print(f"{Fore.YELLOW}Documents: {extra}{Style.RESET_ALL}")
                                 if notes:
-                                    print(f"{Fore.WHITE}Current Notes: {Fore.YELLOW}{notes}{Style.RESET_ALL}")
+                                    print(f"{Fore.YELLOW}Notes: {notes}{Style.RESET_ALL}")
+                                
+                                print(f"\n{Fore.CYAN}Enter new values (press Enter to keep current):{Style.RESET_ALL}")
                                 
                                 # Edit spare keys
                                 while True:
-                                    new_sparekeys = input(f"\n{Fore.CYAN}Has spare keys? (Y/N):{Style.RESET_ALL} ").strip().upper()
+                                    new_sparekeys = input(f"{Fore.CYAN}Has spare keys? (Y/N) [{sparekeys}]:{Style.RESET_ALL} ").strip().upper()
+                                    if not new_sparekeys:
+                                        new_sparekeys = sparekeys
                                     if new_sparekeys in ['Y', 'N']:
                                         break
                                     print(f"{Fore.RED}Please enter Y or N.{Style.RESET_ALL}")
                                 
                                 # Edit documents
                                 while True:
-                                    new_extra = input(f"{Fore.CYAN}Has documents? (Y/N):{Style.RESET_ALL} ").strip().upper()
+                                    new_extra = input(f"{Fore.CYAN}Has documents? (Y/N) [{extra}]:{Style.RESET_ALL} ").strip().upper()
+                                    if not new_extra:
+                                        new_extra = extra
                                     if new_extra in ['Y', 'N']:
                                         break
                                     print(f"{Fore.RED}Please enter Y or N.{Style.RESET_ALL}")
                                 
                                 # Edit notes
-                                new_notes = input(f"{Fore.CYAN}Enter notes (or press Enter to keep current):{Style.RESET_ALL} ").strip()
+                                new_notes = input(f"{Fore.CYAN}Enter notes [{notes}]:{Style.RESET_ALL} ").strip()
                                 if not new_notes:
                                     new_notes = notes
                                 
@@ -969,7 +1057,10 @@ class TimesheetManager:
                                 
                                 # Update local data
                                 vehicles[vehicle_idx] = (key, reg, model, new_sparekeys, new_extra, new_notes)
-                                print(f"{Fore.GREEN}Vehicle information updated successfully!{Style.RESET_ALL}")
+                                print(f"\n{Fore.GREEN}Vehicle information updated successfully!{Style.RESET_ALL}")
+                                
+                                # Wait for user to press Enter
+                                input(f"\n{Fore.CYAN}Press Enter to continue...{Style.RESET_ALL}")
                                 
                             except ValueError:
                                 print(f"{Fore.RED}Invalid input.{Style.RESET_ALL}")
@@ -994,6 +1085,224 @@ class TimesheetManager:
             if 'conn' in locals():
                 conn.close()
 
+    def manage_work_week(self):
+        """Manage work hours for a selected week."""
+        try:
+            # Get list of recent Sundays
+            today = datetime.now()
+            current_weekday = today.weekday()
+            days_to_last_sunday = (current_weekday + 1) % 7
+            last_sunday = today - timedelta(days=days_to_last_sunday)
+            
+            # Show last 4 Sundays plus current/following week
+            sundays = [(last_sunday - timedelta(weeks=i)).strftime("%A %d-%m-%Y") 
+                      for i in range(4)]
+            
+            # Add current/following week if we're not already showing it
+            next_sunday = last_sunday + timedelta(weeks=1)
+            if next_sunday.strftime("%A %d-%m-%Y") not in sundays:
+                sundays.insert(0, next_sunday.strftime("%A %d-%m-%Y"))
+            
+            print(f"\n{Fore.CYAN}Select week end date (Sunday):{Style.RESET_ALL}")
+            for i, sunday in enumerate(sundays, 1):
+                print(f"{Fore.WHITE}{i}. {Fore.YELLOW}{sunday}{Style.RESET_ALL}")
+            
+            choice = input(f"\n{Fore.CYAN}Enter week number (1-{len(sundays)}):{Style.RESET_ALL} ").strip()
+            try:
+                week_idx = int(choice) - 1
+                if not (0 <= week_idx < len(sundays)):
+                    print(f"{Fore.RED}Invalid selection.{Style.RESET_ALL}")
+                    return
+                
+                # Calculate selected Sunday based on the index
+                if week_idx == 0:  # Next Sunday
+                    selected_sunday = next_sunday
+                else:  # Past Sundays
+                    selected_sunday = last_sunday - timedelta(weeks=week_idx-1)
+                
+                week_start = selected_sunday - timedelta(days=6)  # Monday
+                
+                while True:
+                    # Get current week's data
+                    conn = psycopg2.connect(**self.pg_config)
+                    cursor = conn.cursor()
+                    
+                    cursor.execute("""
+                        SELECT work_date, start_time, finish_time, total_hours
+                        FROM public.hours
+                        WHERE work_date BETWEEN %s AND %s
+                        ORDER BY work_date
+                    """, (week_start.date(), selected_sunday.date()))
+                    
+                    entries = cursor.fetchall()
+                    
+                    # Clear screen and show menu
+                    os.system('cls' if os.name == 'nt' else 'clear')
+                    print(f"\n{Fore.CYAN}Work Week Hours Manager{Style.RESET_ALL}")
+                    print(f"{Fore.WHITE}Week of {week_start.strftime('%d-%m-%Y')} to {selected_sunday.strftime('%d-%m-%Y')}:{Style.RESET_ALL}")
+                    print(f"\n{Fore.YELLOW}Current Hours:{Style.RESET_ALL}")
+                    print(f"{Fore.WHITE}{'Day':<10} | {'Start':<8} | {'Finish':<8} | {'Hours':<6}{Style.RESET_ALL}")
+                    print("-" * 40)
+                    
+                    total_hours = 0
+                    for entry in entries:
+                        date, start, finish, hours = entry
+                        print(f"{Fore.WHITE}{date.strftime('%A'):<10} | {Fore.YELLOW}{start.strftime('%H:%M'):<8} | {Fore.YELLOW}{finish.strftime('%H:%M'):<8} | {Fore.GREEN}{hours:<6.1f}{Style.RESET_ALL}")
+                        total_hours += hours
+                    
+                    print("-" * 40)
+                    print(f"{Fore.WHITE}Total Hours: {Fore.GREEN}{total_hours:.1f}{Style.RESET_ALL}")
+                    
+                    print(f"\n{Fore.YELLOW}Options:{Style.RESET_ALL}")
+                    print(f"{Fore.WHITE}1. Add/Edit Day{Style.RESET_ALL}")
+                    print(f"{Fore.WHITE}2. Delete Day{Style.RESET_ALL}")
+                    print(f"{Fore.WHITE}3. Done{Style.RESET_ALL}")
+                    
+                    choice = input(f"\n{Fore.CYAN}Enter your choice (1-3):{Style.RESET_ALL} ").strip()
+                    
+                    if choice == '1':
+                        # Show days of the week
+                        print(f"\n{Fore.CYAN}Select a day:{Style.RESET_ALL}")
+                        for i, date in enumerate(week_start + timedelta(days=i) for i in range(7)):
+                            print(f"{Fore.WHITE}{i+1}. {Fore.YELLOW}{date.strftime('%A %d-%m-%Y')}{Style.RESET_ALL}")
+                        
+                        day_choice = input(f"\n{Fore.CYAN}Enter day number (1-7):{Style.RESET_ALL} ").strip()
+                        try:
+                            day_idx = int(day_choice) - 1
+                            if not (0 <= day_idx < 7):
+                                print(f"{Fore.RED}Invalid selection.{Style.RESET_ALL}")
+                                continue
+                            
+                            selected_date = week_start + timedelta(days=day_idx)
+                            
+                            # Get current entry if it exists
+                            current_entry = next((e for e in entries if e[0] == selected_date.date()), None)
+                            
+                            if current_entry:
+                                start_hour = current_entry[1].hour
+                                finish_hour = current_entry[2].hour
+                                print(f"\n{Fore.CYAN}Current times for {selected_date.strftime('%A %d-%m-%Y')}:{Style.RESET_ALL}")
+                                print(f"{Fore.WHITE}Start: {Fore.YELLOW}{start_hour:02d}:00{Style.RESET_ALL}")
+                                print(f"{Fore.WHITE}Finish: {Fore.YELLOW}{finish_hour:02d}:00{Style.RESET_ALL}")
+                            else:
+                                start_hour = 7  # Default start time
+                                finish_hour = 19  # Default finish time
+                                print(f"\n{Fore.CYAN}No entry exists for {selected_date.strftime('%A %d-%m-%Y')}.{Style.RESET_ALL}")
+                                print(f"{Fore.WHITE}Using default times:{Style.RESET_ALL}")
+                                print(f"{Fore.WHITE}Start: {Fore.YELLOW}{start_hour:02d}:00{Style.RESET_ALL}")
+                                print(f"{Fore.WHITE}Finish: {Fore.YELLOW}{finish_hour:02d}:00{Style.RESET_ALL}")
+                            
+                            while True:
+                                print(f"\n{Fore.YELLOW}Options:{Style.RESET_ALL}")
+                                print(f"{Fore.WHITE}1. Adjust Start Time{Style.RESET_ALL}")
+                                print(f"{Fore.WHITE}2. Adjust Finish Time{Style.RESET_ALL}")
+                                print(f"{Fore.WHITE}3. Save and Exit{Style.RESET_ALL}")
+                                
+                                time_choice = input(f"\n{Fore.CYAN}Enter your choice (1-3):{Style.RESET_ALL} ").strip()
+                                
+                                if time_choice == '1':
+                                    while True:
+                                        try:
+                                            new_start = int(input(f"{Fore.CYAN}Enter new start hour (0-{finish_hour-1}):{Style.RESET_ALL} ").strip())
+                                            if 0 <= new_start < finish_hour:
+                                                start_hour = new_start
+                                                break
+                                            else:
+                                                print(f"{Fore.RED}Invalid hour. Must be between 0 and {finish_hour-1}{Style.RESET_ALL}")
+                                        except ValueError:
+                                            print(f"{Fore.RED}Please enter a valid number.{Style.RESET_ALL}")
+                                
+                                elif time_choice == '2':
+                                    while True:
+                                        try:
+                                            new_finish = int(input(f"{Fore.CYAN}Enter new finish hour ({start_hour+1}-23):{Style.RESET_ALL} ").strip())
+                                            if start_hour < new_finish <= 23:
+                                                finish_hour = new_finish
+                                                break
+                                            else:
+                                                print(f"{Fore.RED}Invalid hour. Must be between {start_hour+1} and 23{Style.RESET_ALL}")
+                                        except ValueError:
+                                            print(f"{Fore.RED}Please enter a valid number.{Style.RESET_ALL}")
+                                
+                                elif time_choice == '3':
+                                    break
+                                else:
+                                    print(f"{Fore.RED}Invalid choice.{Style.RESET_ALL}")
+                            
+                            # Save to database
+                            if current_entry:
+                                cursor.execute("""
+                                    UPDATE public.hours 
+                                    SET start_time = %s::time(0), finish_time = %s::time(0), updated_at = CURRENT_TIMESTAMP
+                                    WHERE work_date = %s
+                                """, (f"{start_hour:02d}:00", f"{finish_hour:02d}:00", selected_date.date()))
+                            else:
+                                cursor.execute("""
+                                    INSERT INTO public.hours (work_date, start_time, finish_time)
+                                    VALUES (%s, %s::time(0), %s::time(0))
+                                """, (selected_date.date(), f"{start_hour:02d}:00", f"{finish_hour:02d}:00"))
+                            
+                            conn.commit()
+                            print(f"{Fore.GREEN}Times saved successfully!{Style.RESET_ALL}")
+                            
+                        except ValueError:
+                            print(f"{Fore.RED}Invalid input.{Style.RESET_ALL}")
+                    
+                    elif choice == '2':
+                        if not entries:
+                            print(f"{Fore.YELLOW}No entries to delete.{Style.RESET_ALL}")
+                            continue
+                        
+                        print(f"\n{Fore.CYAN}Select a day to delete:{Style.RESET_ALL}")
+                        for i, entry in enumerate(entries, 1):
+                            date, start, finish, hours = entry
+                            print(f"{Fore.WHITE}{i}. {Fore.YELLOW}{date.strftime('%A %d-%m-%Y')} - {start.strftime('%H:%M')} to {finish.strftime('%H:%M')}{Style.RESET_ALL}")
+                        
+                        delete_choice = input(f"\n{Fore.CYAN}Enter day number (1-{len(entries)}):{Style.RESET_ALL} ").strip()
+                        try:
+                            delete_idx = int(delete_choice) - 1
+                            if not (0 <= delete_idx < len(entries)):
+                                print(f"{Fore.RED}Invalid selection.{Style.RESET_ALL}")
+                                continue
+                            
+                            date_to_delete = entries[delete_idx][0]
+                            confirm = input(f"{Fore.YELLOW}Are you sure you want to delete the entry for {date_to_delete.strftime('%A %d-%m-%Y')}? (y/n):{Style.RESET_ALL} ").strip().lower()
+                            
+                            if confirm == 'y':
+                                cursor.execute("""
+                                    DELETE FROM public.hours
+                                    WHERE work_date = %s
+                                """, (date_to_delete,))
+                                conn.commit()
+                                print(f"{Fore.GREEN}Entry deleted successfully!{Style.RESET_ALL}")
+                            else:
+                                print(f"{Fore.YELLOW}Deletion cancelled.{Style.RESET_ALL}")
+                            
+                        except ValueError:
+                            print(f"{Fore.RED}Invalid input.{Style.RESET_ALL}")
+                    
+                    elif choice == '3':
+                        break
+                    else:
+                        print(f"{Fore.RED}Invalid choice.{Style.RESET_ALL}")
+                    
+                    if 'cursor' in locals():
+                        cursor.close()
+                    if 'conn' in locals():
+                        conn.close()
+                
+            except ValueError:
+                print(f"{Fore.RED}Invalid input.{Style.RESET_ALL}")
+                
+        except Exception as e:
+            logging.error(f"Error managing work week: {e}")
+            print(f"{Fore.RED}Error managing work week: {e}{Style.RESET_ALL}")
+        finally:
+            if 'cursor' in locals():
+                cursor.close()
+            if 'conn' in locals():
+                conn.close()
+
     def print_menu(self):
         """Print the menu with fancy formatting."""
         menu_border = f"{Fore.BLUE}{'═' * 60}{Style.RESET_ALL}"
@@ -1003,17 +1312,13 @@ class TimesheetManager:
         print(menu_title)
         print(menu_border)
         print(f"{Fore.YELLOW}┌──────────────────────────────────────┐{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}1.{Style.RESET_ALL} {Fore.CYAN}Add Work Day                      {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}2.{Style.RESET_ALL} {Fore.CYAN}Edit Work Day                    {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}3.{Style.RESET_ALL} {Fore.CYAN}Delete Work Day                  {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}4.{Style.RESET_ALL} {Fore.CYAN}Show Weekly Hours                {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}5.{Style.RESET_ALL} {Fore.CYAN}Show Load Details                {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}6.{Style.RESET_ALL} {Fore.CYAN}Add Missing Cars                 {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}7.{Style.RESET_ALL} {Fore.CYAN}Edit Car Information             {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}8.{Style.RESET_ALL} {Fore.CYAN}Exit                           {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}1.{Style.RESET_ALL} {Fore.CYAN}Work Week Hours Manager          {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}2.{Style.RESET_ALL} {Fore.CYAN}Manage Missing Cars              {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}3.{Style.RESET_ALL} {Fore.CYAN}Edit Car Information             {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}4.{Style.RESET_ALL} {Fore.CYAN}Exit                           {Fore.YELLOW}│{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}└──────────────────────────────────────┘{Style.RESET_ALL}")
         
-        print(f"{Fore.CYAN}Enter your choice (1-8):{Style.RESET_ALL} ", end="")
+        print(f"{Fore.CYAN}Enter your choice (1-4):{Style.RESET_ALL} ", end="")
 
     def run(self):
         """Run the main application loop."""
@@ -1026,20 +1331,12 @@ class TimesheetManager:
             choice = input()
             
             if choice == '1':
-                self.add_work_day()
+                self.manage_work_week()
             elif choice == '2':
-                self.edit_work_day()
-            elif choice == '3':
-                self.delete_work_day()
-            elif choice == '4':
-                self.show_weekly_hours()
-            elif choice == '5':
-                self.show_load_details()
-            elif choice == '6':
                 self.add_missing_cars()
-            elif choice == '7':
+            elif choice == '3':
                 self.edit_car_info()
-            elif choice == '8':
+            elif choice == '4':
                 print(f"{Fore.GREEN}Exiting...{Style.RESET_ALL}")
                 break
             else:

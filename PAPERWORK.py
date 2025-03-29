@@ -29,7 +29,7 @@ colorama.init(autoreset=True)
 # -------- Logging Setup --------
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 LOG_DIR = os.path.join(SCRIPT_DIR, "logs")
-SQL_DIR = os.path.join(SCRIPT_DIR, "SQL")
+SQL_DIR = os.path.join(SCRIPT_DIR, "sql")
 
 # Ensure directories exist
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -41,10 +41,33 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
     handlers=[
-        logging.FileHandler(LOG_FILE),
-        logging.StreamHandler()
+        logging.FileHandler(LOG_FILE)
     ]
 )
+
+def print_header():
+    """Print a modern header for the application."""
+    print(f"\n{Fore.BLUE}{'═' * 60}{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}   📄 BCA Paperwork System{Style.RESET_ALL}")
+    print(f"{Fore.BLUE}{'═' * 60}{Style.RESET_ALL}")
+
+def print_status(message, status="info"):
+    """Print a status message with appropriate formatting."""
+    if status == "info":
+        print(f"{Fore.CYAN}➜ {message}{Style.RESET_ALL}")
+    elif status == "success":
+        print(f"{Fore.GREEN}✓ {message}{Style.RESET_ALL}")
+    elif status == "error":
+        print(f"{Fore.RED}✗ {message}{Style.RESET_ALL}")
+
+def print_menu():
+    """Print a modern menu interface."""
+    print(f"\n{Fore.CYAN}Available Options:{Style.RESET_ALL}")
+    print(f"{Fore.WHITE}1. {Fore.YELLOW}Create All Paperwork{Style.RESET_ALL}")
+    print(f"{Fore.WHITE}2. {Fore.YELLOW}Create Single Loadsheet{Style.RESET_ALL}")
+    print(f"{Fore.WHITE}3. {Fore.YELLOW}Create Timesheet{Style.RESET_ALL}")
+    print(f"{Fore.WHITE}4. {Fore.YELLOW}Toggle Auto Signature{Style.RESET_ALL}")
+    print(f"{Fore.WHITE}5. {Fore.YELLOW}Exit{Style.RESET_ALL}")
 
 class SignatureConfig:
     """Configuration for signature placement and appearance."""
@@ -1290,816 +1313,56 @@ class PaperworkManager:
         anchor.ext = XDRPositiveSize2D(cx=width_emu, cy=height_emu)
         return anchor
 
-    def test_loadsheet(self, load_number=None):
-        """Test loadsheet generation with debug information."""
-        try:
-            # Check required files first
-            if not self.check_required_files():
-                print(f"{Fore.RED}Please ensure all required files are in place before proceeding.{Style.RESET_ALL}")
-                return False
-
-            if not load_number:
-                # Get list of recent Sundays
-                selected_sunday = self.select_week()
-                if not selected_sunday:
-                    return False
-                    
-                # Get loads for the selected week
-                loads = self.get_loads_for_week(selected_sunday)
-                if not loads:
-                    print(f"{Fore.YELLOW}No loads found for this week.{Style.RESET_ALL}")
-                    return False
-                    
-                print(f"\n{Fore.CYAN}Available loads for testing:{Style.RESET_ALL}")
-                for i, load in enumerate(loads, 1):
-                    print(f"{Fore.WHITE}{i}. {Fore.YELLOW}Load {load[0]}{Style.RESET_ALL}")
-                
-                load_choice = input(f"\n{Fore.CYAN}Enter load number (1-{len(loads)}):{Style.RESET_ALL} ").strip()
-                try:
-                    load_idx = int(load_choice) - 1
-                    if not (0 <= load_idx < len(loads)):
-                        print(f"{Fore.RED}Invalid selection.{Style.RESET_ALL}")
-                        return False
-                    load_number = loads[load_idx][0]
-                except ValueError:
-                    print(f"{Fore.RED}Invalid input.{Style.RESET_ALL}")
-                    return False
-            
-            print(f"\n{Fore.CYAN}Testing loadsheet generation for load {load_number}{Style.RESET_ALL}")
-            
-            # Get load data directly from database
-            try:
-                conn = psycopg2.connect(**self.pg_config)
-                cursor = conn.cursor()
-                print(f"{Fore.GREEN}Database connection successful.{Style.RESET_ALL}")
-            except Exception as e:
-                print(f"{Fore.RED}Database connection failed: {e}{Style.RESET_ALL}")
-                return False
-            
-            try:
-                # Get collections
-                cursor.execute("""
-                    SELECT 
-                        j.dwjtype,
-                        j.dwjcust,
-                        j.dwjname,
-                        j.dwjdate,
-                        j.dwjadrcod,
-                        j.dwjpostco,
-                        j.dwjvehs,
-                        v.dwvvehref,
-                        v.dwvmoddes,
-                        COALESCE(e.sparekeys, 'Y') as sparekeys,
-                        COALESCE(e.extra, 'Y') as extra,
-                        COALESCE(e.carnotes, '') as carnotes,
-                        v.dwvcolcod,
-                        v.dwvdelcod
-                    FROM public.dwjjob j
-                    LEFT JOIN public.dwvveh v ON j.dwjload = v.dwvload AND j.dwjadrcod = v.dwvcolcod
-                    LEFT JOIN public.extracarinfo e ON v.dwvkey = e.idkey
-                    WHERE j.dwjload = %s
-                    AND j.dwjtype = 'C'
-                    ORDER BY j.dwjdate, j.dwjcust
-                """, (load_number,))
-                
-                collections = cursor.fetchall()
-                print(f"\n{Fore.YELLOW}Found {len(collections)} collections:{Style.RESET_ALL}")
-                
-                # Get deliveries
-                cursor.execute("""
-                    SELECT 
-                        j.dwjtype,
-                        j.dwjcust,
-                        j.dwjname,
-                        j.dwjdate,
-                        j.dwjadrcod,
-                        j.dwjpostco,
-                        j.dwjvehs,
-                        v.dwvvehref,
-                        v.dwvmoddes,
-                        COALESCE(e.sparekeys, 'Y') as sparekeys,
-                        COALESCE(e.extra, 'Y') as extra,
-                        COALESCE(e.carnotes, '') as carnotes,
-                        v.dwvcolcod,
-                        v.dwvdelcod
-                    FROM public.dwjjob j
-                    LEFT JOIN public.dwvveh v ON j.dwjload = v.dwvload AND j.dwjadrcod = v.dwvdelcod
-                    LEFT JOIN public.extracarinfo e ON v.dwvkey = e.idkey
-                    WHERE j.dwjload = %s
-                    AND j.dwjtype = 'D'
-                    ORDER BY j.dwjdate, j.dwjcust
-                """, (load_number,))
-                
-                deliveries = cursor.fetchall()
-                print(f"{Fore.YELLOW}Found {len(deliveries)} deliveries:{Style.RESET_ALL}")
-                
-                # Get vehicles
-                cursor.execute("""
-                    SELECT DISTINCT
-                        v.dwvvehref,
-                        v.dwvmoddes,
-                        v.dwvcolcod,
-                        v.dwvdelcod,
-                        COALESCE(e.sparekeys, 'Y') as sparekeys,
-                        COALESCE(e.extra, 'Y') as extra,
-                        COALESCE(e.carnotes, '') as carnotes
-                    FROM public.dwvveh v
-                    LEFT JOIN public.extracarinfo e ON v.dwvkey = e.idkey
-                    WHERE v.dwvload = %s
-                    ORDER BY v.dwvvehref
-                """, (load_number,))
-                
-                vehicles = cursor.fetchall()
-                print(f"{Fore.YELLOW}Found {len(vehicles)} vehicles:{Style.RESET_ALL}")
-                
-                # Format vehicle data for summary
-                formatted_vehicles = []
-                for vehicle in vehicles:
-                    formatted_vehicles.append((
-                        str(vehicle[0] or ''),  # registration
-                        str(vehicle[1] or ''),  # model
-                        'N',  # offloaded (default)
-                        'Y',  # documents (default)
-                        str(vehicle[4] or 'Y'),  # spare keys
-                        str(vehicle[5] or 'Y'),  # extra (documents)
-                        str(vehicle[6] or '')   # notes
-                    ))
-                
-                # Format data for display
-                print(f"\n{Fore.CYAN}Load {load_number} Details:{Style.RESET_ALL}")
-                
-                # Show collections
-                if collections:
-                    print(f"\n{Fore.YELLOW}Collections:{Style.RESET_ALL}")
-                    print(f"{Fore.WHITE}{'Type':<8} | {'Customer':<10} | {'Location':<30} | {'Cars':<5}{Style.RESET_ALL}")
-                    print("-" * 60)
-                    # Create a set of unique collections based on name and postcode
-                    unique_collections = {}
-                    for collection in collections:
-                        location = f"{collection[2]} - {collection[5]}" if collection[2] and collection[5] else collection[2] or ''
-                        if location not in unique_collections:
-                            unique_collections[location] = {
-                                'customer': collection[1],
-                                'cars': collection[6]
-                            }
-                    
-                    # Display unique collections
-                    for location, details in sorted(unique_collections.items()):
-                        print(f"{Fore.WHITE}{'C':<8} | {Fore.YELLOW}{details['customer']:<10} | {Fore.YELLOW}{location:<30} | {Fore.YELLOW}{details['cars']:<5}{Style.RESET_ALL}")
-                
-                # Show deliveries
-                if deliveries:
-                    print(f"\n{Fore.YELLOW}Deliveries:{Style.RESET_ALL}")
-                    print(f"{Fore.WHITE}{'Type':<8} | {'Customer':<10} | {'Location':<30} | {'Cars':<5}{Style.RESET_ALL}")
-                    print("-" * 60)
-                    # Create a set of unique deliveries based on name and postcode
-                    unique_deliveries = {}
-                    for delivery in deliveries:
-                        location = f"{delivery[2]} - {delivery[5]}" if delivery[2] and delivery[5] else delivery[2] or ''
-                        if location not in unique_deliveries:
-                            unique_deliveries[location] = {
-                                'customer': delivery[1],
-                                'cars': delivery[6]
-                            }
-                    
-                    # Display unique deliveries
-                    for location, details in sorted(unique_deliveries.items()):
-                        print(f"{Fore.WHITE}{'D':<8} | {Fore.YELLOW}{details['customer']:<10} | {Fore.YELLOW}{location:<30} | {Fore.YELLOW}{details['cars']:<5}{Style.RESET_ALL}")
-                
-                # Show vehicles
-                if vehicles:
-                    print(f"\n{Fore.YELLOW}Vehicles:{Style.RESET_ALL}")
-                    print(f"{Fore.WHITE}{'Reg':<10} | {'Model':<30} | {'Offloaded':<10} | {'Documents':<10} | {'Spare Keys':<10} | {'Notes'}{Style.RESET_ALL}")
-                    print("-" * 100)
-                    for vehicle in vehicles:
-                        print(f"{Fore.WHITE}{str(vehicle[0] or ''):<10} | {Fore.YELLOW}{str(vehicle[1] or ''):<30} | {Fore.YELLOW}{'N':<10} | {Fore.YELLOW}{'Y':<10} | {Fore.YELLOW}{str(vehicle[4] or 'Y'):<10} | {Fore.YELLOW}{str(vehicle[6] or '')}{Style.RESET_ALL}")
-                
-                # Generate and add load summary message
-                summary_message = self.generate_load_summary(formatted_vehicles)
-                print(f"\n{Fore.CYAN}Load Summary:{Style.RESET_ALL}")
-                print(f"{Fore.WHITE}{summary_message}{Style.RESET_ALL}")
-                
-                # Confirm test file generation
-                confirm = input(f"\n{Fore.YELLOW}Generate test.xlsx file? (y/n):{Style.RESET_ALL} ").strip().lower()
-                if confirm != 'y':
-                    print(f"{Fore.YELLOW}Operation cancelled.{Style.RESET_ALL}")
-                    return False
-                
-                # Create test directory if it doesn't exist
-                test_dir = os.path.join(SCRIPT_DIR, "test")
-                os.makedirs(test_dir, exist_ok=True)
-                
-                # Copy template to test.xlsx
-                template_path = os.path.join(SCRIPT_DIR, "templates", "loadsheet.xlsx")
-                test_file_path = os.path.join(test_dir, "test.xlsx")
-                
-                if not os.path.exists(template_path):
-                    print(f"{Fore.RED}Template file not found at {template_path}{Style.RESET_ALL}")
-                    return False
-                
-                # Copy template file
-                import shutil
-                shutil.copy2(template_path, test_file_path)
-                
-                # Load the workbook
-                wb = load_workbook(test_file_path)
-                ws = wb["Loadsheet"]  # Use the correct sheet name
-                
-                try:
-                    def safe_cell_write(cell_ref, value):
-                        """Safely write to a cell."""
-                        try:
-                            cell = ws[cell_ref]
-                            # If the cell is a merged cell, get its parent cell
-                            if hasattr(cell, 'parent') and cell.parent is not None:
-                                cell = cell.parent
-                            # Convert value to string and capitalize if it's not None
-                            cell.value = str(value).upper() if value is not None else ''
-                        except Exception as e:
-                            logging.error(f"Error writing to cell {cell_ref}: {e}")
-                    
-                    # Update header information
-                    if collections:
-                        # Get the first collection date
-                        date_str = str(collections[0][3])
-                        try:
-                            if len(date_str) == 8:  # Ensure date string is in YYYYMMDD format
-                                date_obj = datetime.strptime(date_str, '%Y%m%d')
-                                formatted_date = date_obj.strftime('%d/%m/%Y')
-                                # Update collection date in header
-                                safe_cell_write('C6', formatted_date)  # Collection date in header
-                        except ValueError as e:
-                            print(f"{Fore.YELLOW}Warning: Error parsing collection date ({date_str}): {e}{Style.RESET_ALL}")
-                    
-                    if deliveries:
-                        # Get the first delivery date
-                        date_str = str(deliveries[0][3])
-                        try:
-                            if len(date_str) == 8:  # Ensure date string is in YYYYMMDD format
-                                date_obj = datetime.strptime(date_str, '%Y%m%d')
-                                formatted_date = date_obj.strftime('%d/%m/%Y')
-                                # Update delivery date in signature section
-                                safe_cell_write('H46', formatted_date)  # Delivery date in signature section
-                        except ValueError as e:
-                            print(f"{Fore.YELLOW}Warning: Error parsing delivery date ({date_str}): {e}{Style.RESET_ALL}")
-                    
-                    # Update collection date in signature section
-                    if collections:
-                        date_str = str(collections[0][3])
-                        try:
-                            if len(date_str) == 8:  # Ensure date string is in YYYYMMDD format
-                                date_obj = datetime.strptime(date_str, '%Y%m%d')
-                                formatted_date = date_obj.strftime('%d/%m/%Y')
-                                safe_cell_write('C46', formatted_date)  # Collection date in signature section
-                        except ValueError as e:
-                            print(f"{Fore.YELLOW}Warning: Error parsing collection date ({date_str}): {e}{Style.RESET_ALL}")
-                    
-                    safe_cell_write('G6', str(load_number))  # Load Number
-                    safe_cell_write('I6', str(load_number))  # Job ID (using load number)
-                    
-                    # Update collection and delivery locations
-                    if collections:
-                        # Create a set of unique collection locations
-                        unique_collections = {}
-                        for collection in collections:
-                            location = f"{collection[2]} - {collection[5]}" if collection[2] and collection[5] else collection[2] or ''
-                            if location not in unique_collections:
-                                unique_collections[location] = 1
-                            else:
-                                unique_collections[location] += 1
-                        
-                        # Join all locations with newlines
-                        collection_text = '\n'.join(unique_collections.keys())
-                        safe_cell_write('B9', collection_text)
-                    
-                    if deliveries:
-                        # Create a set of unique delivery locations
-                        unique_deliveries = {}
-                        for delivery in deliveries:
-                            location = f"{delivery[2]} - {delivery[5]}" if delivery[2] and delivery[5] else delivery[2] or ''
-                            if location not in unique_deliveries:
-                                unique_deliveries[location] = 1
-                            else:
-                                unique_deliveries[location] += 1
-                        
-                        # Join all locations with newlines
-                        delivery_text = '\n'.join(unique_deliveries.keys())
-                        safe_cell_write('F9', delivery_text)
-                    
-                    # Update vehicle information
-                    for i, vehicle in enumerate(formatted_vehicles[:8]):  # Handle up to 8 vehicles
-                        base_row = 11 + (i * 4)  # Starting from row 11, increment by 4 for each car
-                        
-                        # Car details - swapped registration and make & model, and capitalize all data
-                        safe_cell_write(f'B{base_row}', str(vehicle[1] or '').upper())  # Make & Model
-                        safe_cell_write(f'B{base_row + 2}', str(vehicle[0] or '').upper())  # Registration
-                        safe_cell_write(f'E{base_row - 1}', 'N')  # Offloaded (default)
-                        safe_cell_write(f'G{base_row - 1}', 'Y')  # Documents (default)
-                        safe_cell_write(f'I{base_row - 1}', str(vehicle[4] or 'Y').upper())  # Spare Keys
-                        if vehicle[6]:  # Notes
-                            safe_cell_write(f'C{base_row}', str(vehicle[6]).upper())
-                    
-                    # Generate and add load summary message
-                    summary_message = self.generate_load_summary(formatted_vehicles)
-                    safe_cell_write('C39', summary_message.upper())  # Capitalize summary message
-                    
-                    # Add signatures if auto_signature is enabled
-                    if self.auto_signature:
-                        self.add_signatures(ws)
-                    
-                    # Save the workbook
-                    wb.save(test_file_path)
-                    print(f"{Fore.GREEN}Test file generated successfully at: {test_file_path}{Style.RESET_ALL}")
-                    
-                    # Ask if user wants to verify the file
-                    verify = input(f"\n{Fore.YELLOW}Open test.xlsx to verify? (y/n):{Style.RESET_ALL} ").strip().lower()
-                    if verify == 'y':
-                        try:
-                            if os.name == 'nt':  # Windows
-                                os.startfile(test_file_path)
-                            elif os.name == 'posix':  # macOS and Linux
-                                import subprocess
-                                subprocess.run(['xdg-open', test_file_path])
-                        except Exception as e:
-                            print(f"{Fore.YELLOW}Warning: Could not open file automatically: {e}{Style.RESET_ALL}")
-                            print(f"{Fore.CYAN}Please open the file manually at: {test_file_path}{Style.RESET_ALL}")
-                    
-                    return True
-                    
-                except Exception as e:
-                    print(f"{Fore.RED}Error updating Excel file: {e}{Style.RESET_ALL}")
-                    logging.error(f"Error updating Excel file: {e}", exc_info=True)
-                    return False
-                
-            except Exception as e:
-                print(f"{Fore.RED}Error during query execution: {e}{Style.RESET_ALL}")
-                logging.error(f"Error during query execution: {e}", exc_info=True)
-                return False
-            finally:
-                if 'cursor' in locals():
-                    cursor.close()
-                if 'conn' in locals():
-                    conn.close()
-            
-        except Exception as e:
-            logging.error(f"Error in test_loadsheet: {e}", exc_info=True)
-            print(f"{Fore.RED}Error generating test loadsheet: {e}{Style.RESET_ALL}")
-            return False
-
-    def toggle_auto_signature(self):
-        """Toggle auto signature feature on/off and save setting."""
-        self.auto_signature = not self.auto_signature
-        self.save_auto_signature_config()
-        status = "enabled" if self.auto_signature else "disabled"
-        print(f"{Fore.GREEN}Auto signature {status}.{Style.RESET_ALL}")
-
-    def test_load_details(self):
-        """Test getting load details directly from PostgreSQL."""
-        try:
-            # Get list of recent Sundays
-            selected_sunday = self.select_week()
-            if not selected_sunday:
-                return False
-                
-            # Get loads for the selected week
-            loads = self.get_loads_for_week(selected_sunday)
-            if not loads:
-                print(f"{Fore.YELLOW}No loads found for this week.{Style.RESET_ALL}")
-                return False
-                
-            print(f"\n{Fore.CYAN}Available loads for testing:{Style.RESET_ALL}")
-            for i, load in enumerate(loads, 1):
-                print(f"{Fore.WHITE}{i}. {Fore.YELLOW}Load {load[0]}{Style.RESET_ALL}")
-            
-            load_choice = input(f"\n{Fore.CYAN}Enter load number (1-{len(loads)}):{Style.RESET_ALL} ").strip()
-            try:
-                load_idx = int(load_choice) - 1
-                if not (0 <= load_idx < len(loads)):
-                    print(f"{Fore.RED}Invalid selection.{Style.RESET_ALL}")
-                    return False
-                load_number = loads[load_idx][0]
-            except ValueError:
-                print(f"{Fore.RED}Invalid input.{Style.RESET_ALL}")
-                return False
-            
-            print(f"\n{Fore.CYAN}Testing load details retrieval for load {load_number}{Style.RESET_ALL}")
-            
-            # Test database connection
-            try:
-                conn = psycopg2.connect(**self.pg_config)
-                cursor = conn.cursor()
-                print(f"{Fore.GREEN}Database connection successful.{Style.RESET_ALL}")
-            except Exception as e:
-                print(f"{Fore.RED}Database connection failed: {e}{Style.RESET_ALL}")
-                return False
-            
-            try:
-                # Test getting collections
-                print(f"\n{Fore.YELLOW}Testing collections query:{Style.RESET_ALL}")
-                cursor.execute("""
-                    SELECT 
-                        j.dwjtype,
-                        j.dwjcust,
-                        j.dwjname,
-                        j.dwjdate,
-                        j.dwjadrcod,
-                        j.dwjpostco,
-                        j.dwjvehs,
-                        v.dwvvehref,
-                        v.dwvmoddes,
-                        COALESCE(e.sparekeys, 'Y') as sparekeys,
-                        COALESCE(e.extra, 'Y') as extra,
-                        COALESCE(e.carnotes, '') as carnotes,
-                        v.dwvcolcod,
-                        v.dwvdelcod
-                    FROM public.dwjjob j
-                    LEFT JOIN public.dwvveh v ON j.dwjload = v.dwvload AND j.dwjadrcod = v.dwvcolcod
-                    LEFT JOIN public.extracarinfo e ON v.dwvkey = e.idkey
-                    WHERE j.dwjload = %s
-                    AND j.dwjtype = 'C'
-                    ORDER BY j.dwjdate, j.dwjcust
-                """, (load_number,))
-                
-                collections = cursor.fetchall()
-                print(f"{Fore.WHITE}Found {len(collections)} collections:{Style.RESET_ALL}")
-                for i, collection in enumerate(collections, 1):
-                    print(f"\n{Fore.YELLOW}Collection {i}:{Style.RESET_ALL}")
-                    print(f"Type: {collection[0]}")
-                    print(f"Customer: {collection[1]}")
-                    print(f"Name: {collection[2]}")
-                    print(f"Date: {collection[3]}")
-                    print(f"Address Code: {collection[4]}")
-                    print(f"Postcode: {collection[5]}")
-                    print(f"Vehicles: {collection[6]}")
-                    print(f"Vehicle Ref: {collection[7]}")
-                    print(f"Model: {collection[8]}")
-                    print(f"Spare Keys: {collection[9]}")
-                    print(f"Extra: {collection[10]}")
-                    print(f"Notes: {collection[11]}")
-                    print(f"Collection Code: {collection[12]}")
-                    print(f"Delivery Code: {collection[13]}")
-                
-                # Test getting deliveries
-                print(f"\n{Fore.YELLOW}Testing deliveries query:{Style.RESET_ALL}")
-                cursor.execute("""
-                    SELECT 
-                        j.dwjtype,
-                        j.dwjcust,
-                        j.dwjname,
-                        j.dwjdate,
-                        j.dwjadrcod,
-                        j.dwjpostco,
-                        j.dwjvehs,
-                        v.dwvvehref,
-                        v.dwvmoddes,
-                        COALESCE(e.sparekeys, 'Y') as sparekeys,
-                        COALESCE(e.extra, 'Y') as extra,
-                        COALESCE(e.carnotes, '') as carnotes,
-                        v.dwvcolcod,
-                        v.dwvdelcod
-                    FROM public.dwjjob j
-                    LEFT JOIN public.dwvveh v ON j.dwjload = v.dwvload AND j.dwjadrcod = v.dwvdelcod
-                    LEFT JOIN public.extracarinfo e ON v.dwvkey = e.idkey
-                    WHERE j.dwjload = %s
-                    AND j.dwjtype = 'D'
-                    ORDER BY j.dwjdate, j.dwjcust
-                """, (load_number,))
-                
-                deliveries = cursor.fetchall()
-                print(f"{Fore.WHITE}Found {len(deliveries)} deliveries:{Style.RESET_ALL}")
-                for i, delivery in enumerate(deliveries, 1):
-                    print(f"\n{Fore.YELLOW}Delivery {i}:{Style.RESET_ALL}")
-                    print(f"Type: {delivery[0]}")
-                    print(f"Customer: {delivery[1]}")
-                    print(f"Name: {delivery[2]}")
-                    print(f"Date: {delivery[3]}")
-                    print(f"Address Code: {delivery[4]}")
-                    print(f"Postcode: {delivery[5]}")
-                    print(f"Vehicles: {delivery[6]}")
-                    print(f"Vehicle Ref: {delivery[7]}")
-                    print(f"Model: {delivery[8]}")
-                    print(f"Spare Keys: {delivery[9]}")
-                    print(f"Extra: {delivery[10]}")
-                    print(f"Notes: {delivery[11]}")
-                    print(f"Collection Code: {delivery[12]}")
-                    print(f"Delivery Code: {delivery[13]}")
-                
-                # Test getting vehicle details
-                print(f"\n{Fore.YELLOW}Testing vehicle details query:{Style.RESET_ALL}")
-                cursor.execute("""
-                    SELECT DISTINCT
-                        v.dwvvehref,
-                        v.dwvmoddes,
-                        v.dwvcolcod,
-                        v.dwvdelcod,
-                        COALESCE(e.sparekeys, 'Y') as sparekeys,
-                        COALESCE(e.extra, 'Y') as extra,
-                        COALESCE(e.carnotes, '') as carnotes
-                    FROM public.dwvveh v
-                    LEFT JOIN public.extracarinfo e ON v.dwvkey = e.idkey
-                    WHERE v.dwvload = %s
-                    ORDER BY v.dwvvehref
-                """, (load_number,))
-                
-                vehicles = cursor.fetchall()
-                print(f"{Fore.WHITE}Found {len(vehicles)} vehicles:{Style.RESET_ALL}")
-                for i, vehicle in enumerate(vehicles, 1):
-                    print(f"\n{Fore.YELLOW}Vehicle {i}:{Style.RESET_ALL}")
-                    print(f"Reference: {vehicle[0]}")
-                    print(f"Model: {vehicle[1]}")
-                    print(f"Collection Code: {vehicle[2]}")
-                    print(f"Delivery Code: {vehicle[3]}")
-                    print(f"Spare Keys: {vehicle[4]}")
-                    print(f"Extra: {vehicle[5]}")
-                    print(f"Notes: {vehicle[6]}")
-                
-                cursor.close()
-                conn.close()
-                print(f"\n{Fore.GREEN}Load details retrieval test completed successfully.{Style.RESET_ALL}")
-                return True
-                
-            except Exception as e:
-                print(f"{Fore.RED}Error during query execution: {e}{Style.RESET_ALL}")
-                logging.error(f"Error during query execution: {e}", exc_info=True)
-                return False
-            finally:
-                if 'cursor' in locals():
-                    cursor.close()
-                if 'conn' in locals():
-                    conn.close()
-            
-        except Exception as e:
-            logging.error(f"Error in test_load_details: {e}", exc_info=True)
-            print(f"{Fore.RED}Error testing load details: {e}{Style.RESET_ALL}")
-            return False
-
-    def print_menu(self):
-        """Print the menu with fancy formatting."""
-        menu_border = f"{Fore.BLUE}{'═' * 60}{Style.RESET_ALL}"
-        menu_title = f"{Fore.CYAN}{'▌' * 5} Paperwork Manager {'▌' * 5}{Style.RESET_ALL}"
-        
-        print("\n" + menu_border)
-        print(menu_title)
-        print(menu_border)
-        print(f"{Fore.YELLOW}┌──────────────────────────────────────┐{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}1.{Style.RESET_ALL} {Fore.CYAN}Create Loadsheet                {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}2.{Style.RESET_ALL} {Fore.CYAN}Create Timesheet                {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}3.{Style.RESET_ALL} {Fore.CYAN}Create All Paperwork            {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}4.{Style.RESET_ALL} {Fore.CYAN}Test Loadsheet                 {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}5.{Style.RESET_ALL} {Fore.CYAN}Test Load Details              {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}6.{Style.RESET_ALL} {Fore.CYAN}Test Timesheet                 {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}7.{Style.RESET_ALL} {Fore.CYAN}Toggle Auto Signature          {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}8.{Style.RESET_ALL} {Fore.CYAN}Exit                         {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}└──────────────────────────────────────┘{Style.RESET_ALL}")
-        
-        print(f"{Fore.CYAN}Enter your choice (1-8):{Style.RESET_ALL} ", end="")
-
-    def test_timesheet(self):
-        """Test timesheet generation with debug information."""
-        try:
-            # Check required files first
-            if not self.check_required_files():
-                print(f"{Fore.RED}Please ensure all required files are in place before proceeding.{Style.RESET_ALL}")
-                return False
-
-            # Get list of recent Sundays
-            selected_sunday = self.select_week()
-            if not selected_sunday:
-                return False
-                
-            # Calculate week start (Monday)
-            week_start = selected_sunday - timedelta(days=6)
-            
-            print(f"\n{Fore.CYAN}Selected week:{Style.RESET_ALL}")
-            print(f"{Fore.WHITE}Week Start (Monday): {Fore.YELLOW}{week_start.strftime('%A %d-%m-%Y')}{Style.RESET_ALL}")
-            print(f"{Fore.WHITE}Week End (Sunday): {Fore.YELLOW}{selected_sunday.strftime('%A %d-%m-%Y')}{Style.RESET_ALL}")
-            
-            # Get loads and hours for the week
-            try:
-                conn = psycopg2.connect(**self.pg_config)
-                cursor = conn.cursor()
-                print(f"{Fore.GREEN}Database connection successful.{Style.RESET_ALL}")
-            except Exception as e:
-                print(f"{Fore.RED}Database connection failed: {e}{Style.RESET_ALL}")
-                return False
-            
-            try:
-                # Get loads for the week with all required information
-                cursor.execute("""
-                    WITH load_dates AS (
-                        SELECT 
-                            j.dwjload,
-                            MAX(j.dwjdate) as load_date,
-                            j.dwjcust as contractor,
-                            STRING_AGG(DISTINCT CASE WHEN j.dwjtype = 'C' THEN j.dwjtown ELSE NULL END, ' | ') as collections,
-                            STRING_AGG(DISTINCT CASE WHEN j.dwjtype = 'D' THEN j.dwjtown ELSE NULL END, ' | ') as deliveries,
-                            COUNT(DISTINCT v.dwvvehref) as total_cars
-                        FROM public.dwjjob j
-                        LEFT JOIN public.dwvveh v ON j.dwjload = v.dwvload
-                        WHERE j.dwjdate BETWEEN %s AND %s
-                        GROUP BY j.dwjload, j.dwjcust
-                    )
-                    SELECT DISTINCT
-                        l.load_date,
-                        l.contractor,
-                        l.collections,
-                        l.deliveries,
-                        l.total_cars,
-                        h.start_time,
-                        h.finish_time,
-                        h.total_hours,
-                        l.dwjload
-                    FROM load_dates l
-                    LEFT JOIN public.hours h ON CAST(l.load_date AS TEXT) = TO_CHAR(h.work_date, 'YYYYMMDD')
-                    ORDER BY l.load_date, l.dwjload
-                """, (week_start.strftime("%Y%m%d"), selected_sunday.strftime("%Y%m%d")))
-                
-                loads = cursor.fetchall()
-                
-                if not loads:
-                    print(f"{Fore.YELLOW}No loads found for this week.{Style.RESET_ALL}")
-                    return False
-                
-                # Log detailed information about each load
-                print(f"\n{Fore.CYAN}Detailed Load Information:{Style.RESET_ALL}")
-                for i, load in enumerate(loads, 1):
-                    date = datetime.strptime(str(load[0]), "%Y%m%d")
-                    day_name = date.strftime("%A").upper()
-                    print(f"\n{Fore.YELLOW}Load {i}:{Style.RESET_ALL}")
-                    print(f"Load Number: {load[8]}")
-                    print(f"Date: {date.strftime('%A %d-%m-%Y')}")
-                    print(f"Contractor: {load[1]}")
-                    print(f"Collections: {load[2]}")
-                    print(f"Deliveries: {load[3]}")
-                    print(f"Total Cars: {load[4]}")
-                    print(f"Start Time: {load[5]}")
-                    print(f"Finish Time: {load[6]}")
-                    print(f"Total Hours: {load[7]}")
-                    
-                    logging.info(f"Load {i}: Date={date.strftime('%A %d-%m-%Y')}, Contractor={load[1]}, Cars={load[4]}, Hours={load[7]}")
-                
-                # Organize loads by day of week
-                daily_loads = {}
-                for load in loads:
-                    date = datetime.strptime(str(load[0]), "%Y%m%d")
-                    day_name = date.strftime("%A").upper()
-                    if day_name not in daily_loads:
-                        daily_loads[day_name] = {
-                            'loads': [],
-                            'start_time': load[5],
-                            'finish_time': load[6],
-                            'total_hours': load[7]
-                        }
-                    daily_loads[day_name]['loads'].append(load)
-                
-                logging.info(f"Organized loads by day: {list(daily_loads.keys())}")
-                
-                # Process each day's loads
-                day_row_mapping = {
-                    'MONDAY': {'start': 8, 'end': 10},
-                    'TUESDAY': {'start': 11, 'end': 13},
-                    'WEDNESDAY': {'start': 14, 'end': 16},
-                    'THURSDAY': {'start': 17, 'end': 19},
-                    'FRIDAY': {'start': 20, 'end': 22},
-                    'SATURDAY': {'start': 23, 'end': 25},
-                    'SUNDAY': {'start': 26, 'end': 28}
-                }
-                
-                overflow_row = 29
-                has_overflow = False
-                
-                # Define day order
-                day_order = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']
-                
-                for day in day_order:
-                    if day in daily_loads:
-                        day_data = daily_loads[day]
-                        rows = day_row_mapping[day]
-                        current_row = rows['start']
-                        
-                        logging.info(f"Processing {day}: {len(day_data['loads'])} loads")
-                        
-                        # Write loads for the day
-                        for load in day_data['loads']:
-                            if current_row <= rows['end']:
-                                # Write contractor name
-                                safe_cell_write(f'C{current_row}', load[1])
-                                
-                                # Write number of cars
-                                safe_cell_write(f'D{current_row}', load[4])
-                                
-                                # Write collection towns
-                                safe_cell_write(f'E{current_row}', load[2] or '')
-                                
-                                # Write delivery towns
-                                safe_cell_write(f'F{current_row}', load[3] or '')
-                                
-                                logging.info(f"Wrote load data to row {current_row}: Contractor={load[1]}, Cars={load[4]}")
-                                
-                                current_row += 1
-                            else:
-                                # Mark that we have overflow loads
-                                has_overflow = True
-                                # Write overflow loads
-                                safe_cell_write(f'C{overflow_row}', load[1])
-                                safe_cell_write(f'D{overflow_row}', load[4])
-                                safe_cell_write(f'E{overflow_row}', load[2] or '')
-                                safe_cell_write(f'F{overflow_row}', load[3] or '')
-                                logging.info(f"Wrote overflow load to row {overflow_row}")
-                                overflow_row += 1
-                        
-                        # Write hours for the day if available
-                        if day_data['start_time'] and day_data['finish_time']:
-                            # Write hours in the first row of each day
-                            safe_cell_write(f'H{rows["start"]}', format_time(day_data['start_time']))
-                            safe_cell_write(f'I{rows["start"]}', format_time(day_data['finish_time']))
-                            safe_cell_write(f'J{rows["start"]}', format_total_hours(day_data['total_hours']))
-                            logging.info(f"Wrote hours for {day}: Start={day_data['start_time']}, Finish={day_data['finish_time']}, Total={day_data['total_hours']}")
-                
-                # Calculate and write total hours
-                total_hours = sum(float(day_data['total_hours'] or 0) for day_data in daily_loads.values())
-                safe_cell_write('J29', format_total_hours(total_hours))
-                logging.info(f"Wrote total hours: {total_hours}")
-                
-                # Save the workbook
-                workbook.save(output_file)
-                logging.info(f"Successfully saved timesheet to {output_file}")
-                
-                # Verify the file was saved correctly
-                if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
-                    print(f"{Fore.GREEN}Timesheet created successfully at {output_file}{Style.RESET_ALL}")
-                    return True
-                else:
-                    print(f"{Fore.RED}Error: Timesheet file was not created or is empty{Style.RESET_ALL}")
-                    return False
-            finally:
-                if 'cursor' in locals():
-                    cursor.close()
-                if 'conn' in locals():
-                    conn.close()
-            
-        except Exception as e:
-            logging.error(f"Error in test_timesheet: {e}", exc_info=True)
-            print(f"{Fore.RED}Error generating test timesheet: {e}{Style.RESET_ALL}")
-            return False
-
     def run(self):
-        """Run the main application loop."""
-        print(f"{Fore.BLUE}{'═' * 60}{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}   Paperwork Manager{Style.RESET_ALL}")
-        print(f"{Fore.BLUE}{'═' * 60}{Style.RESET_ALL}")
-        
+        """Main menu loop."""
         while True:
-            self.print_menu()
-            choice = input()
+            print_header()
+            print_menu()
             
-            if choice == '1':
+            choice = input(f"\n{Fore.CYAN}Enter your choice (1-5):{Style.RESET_ALL} ").strip()
+            
+            if choice == "1":
+                print_status("Creating all paperwork...")
                 selected_sunday = self.select_week()
                 if selected_sunday:
-                    loads = self.get_loads_for_week(selected_sunday)
-                    if loads:
-                        print(f"\n{Fore.CYAN}Available loads:{Style.RESET_ALL}")
-                        for i, load in enumerate(loads, 1):
-                            print(f"{Fore.WHITE}{i}. {Fore.YELLOW}Load {load[0]}{Style.RESET_ALL}")
-                        
-                        load_choice = input(f"\n{Fore.CYAN}Enter load number (1-{len(loads)}):{Style.RESET_ALL} ").strip()
-                        try:
-                            load_idx = int(load_choice) - 1
-                            if 0 <= load_idx < len(loads):
-                                self.create_loadsheet(loads[load_idx][0])
-                        except ValueError:
-                            print(f"{Fore.RED}Invalid input.{Style.RESET_ALL}")
+                    if self.create_all_paperwork(selected_sunday):
+                        print_status("All paperwork created successfully!", "success")
                     else:
-                        print(f"{Fore.YELLOW}No loads found for this week.{Style.RESET_ALL}")
-                        
-            elif choice == '2':
+                        print_status("Failed to create paperwork.", "error")
+            
+            elif choice == "2":
+                print_status("Creating single loadsheet...")
+                load_number = input(f"{Fore.CYAN}Enter load number:{Style.RESET_ALL} ").strip()
+                if load_number:
+                    if self.create_loadsheet(load_number):
+                        print_status("Loadsheet created successfully!", "success")
+                    else:
+                        print_status("Failed to create loadsheet.", "error")
+            
+            elif choice == "3":
+                print_status("Creating timesheet...")
                 selected_sunday = self.select_week()
                 if selected_sunday:
-                    self.create_timesheet(selected_sunday)
-                    
-            elif choice == '3':
-                selected_sunday = self.select_week()
-                if selected_sunday:
-                    self.create_all_paperwork(selected_sunday)
-                    
-            elif choice == '4':
-                self.test_loadsheet()
-                
-            elif choice == '5':
-                self.test_load_details()
-                
-            elif choice == '6':
-                self.test_timesheet()
-                
-            elif choice == '7':
-                self.toggle_auto_signature()
-                
-            elif choice == '8':
-                print(f"{Fore.GREEN}Exiting...{Style.RESET_ALL}")
+                    if self.create_timesheet(selected_sunday):
+                        print_status("Timesheet created successfully!", "success")
+                    else:
+                        print_status("Failed to create timesheet.", "error")
+            
+            elif choice == "4":
+                print_status("Toggling auto signature...")
+                if self.toggle_auto_signature():
+                    print_status("Auto signature toggled successfully!", "success")
+                else:
+                    print_status("Failed to toggle auto signature.", "error")
+            
+            elif choice == "5":
+                print_status("Exiting program...", "info")
                 break
-                
+            
             else:
-                print(f"{Fore.RED}Invalid choice. Please try again.{Style.RESET_ALL}")
+                print_status("Invalid choice. Please try again.", "error")
+            
+            input(f"\n{Fore.YELLOW}Press Enter to continue...{Style.RESET_ALL}")
 
 if __name__ == "__main__":
     manager = PaperworkManager()

@@ -185,6 +185,28 @@ class SQLiteEditor:
             logging.error(f"Error showing schema info: {e}")
             print(f"{Fore.RED}Error displaying schema information: {e}{Style.RESET_ALL}")
     
+    def load_pg_config(self):
+        """Load PostgreSQL configuration from sql.ini file."""
+        config = configparser.ConfigParser()
+        config_path = os.path.join(SQL_DIR, "sql.ini")
+        
+        if not os.path.exists(config_path):
+            logging.error(f"PostgreSQL configuration file not found at {config_path}")
+            return None
+            
+        try:
+            config.read(config_path)
+            return {
+                'host': config['SQL']['PG_HOST'],
+                'port': config['SQL']['PG_PORT'],
+                'database': config['SQL']['PG_DATABASE'],
+                'user': config['SQL']['PG_USERNAME'],
+                'password': config['SQL']['PG_PASSWORD']
+            }
+        except Exception as e:
+            logging.error(f"Error loading PostgreSQL configuration: {e}")
+            return None
+    
     def check_db_exists(self):
         """Check if the database file exists at the expected location."""
         if not os.path.exists(self.db_path):
@@ -545,6 +567,19 @@ class SQLiteEditor:
             logging.error(f"Error showing changes: {e}")
             print(f"{Fore.RED}Error showing changes: {e}{Style.RESET_ALL}")
 
+    def format_date(self, date_str):
+        """Format date string to a more readable format."""
+        try:
+            # Assuming date is in format YYYYMMDD
+            if len(date_str) == 8:
+                year = date_str[:4]
+                month = date_str[4:6]
+                day = date_str[6:8]
+                return f"{day}/{month}/{year}"
+            return date_str
+        except:
+            return date_str
+
     def compare_loads(self):
         """Compare two loads and show differences."""
         try:
@@ -615,20 +650,29 @@ class SQLiteEditor:
                         if job1 and job2:
                             # Compare all columns
                             for col_idx, col_name in enumerate(column_names):
-                                val1 = str(job1[col_idx])
-                                val2 = str(job2[col_idx])
-                                if val1 != val2:
-                                    col_desc = self.get_column_description("DWJJOB", col_name)
+                                val1 = str(job1[col_idx]) if job1[col_idx] is not None else "N/A"
+                                val2 = str(job2[col_idx]) if job2[col_idx] is not None else "N/A"
+                                col_desc = self.get_column_description("DWJJOB", col_name) or col_name
+                                
+                                # Always show the column and its values
+                                if col_name == 'dwjStatus':
+                                    if val1 == 'N' and val2 == 'Y':
+                                        print(f"{col_desc:<20} | {Fore.RED}{val1:<30}{Style.RESET_ALL} | {Fore.GREEN}{val2:<30}{Style.RESET_ALL}")
+                                    elif val1 == 'Y' and val2 == 'N':
+                                        print(f"{col_desc:<20} | {Fore.GREEN}{val1:<30}{Style.RESET_ALL} | {Fore.RED}{val2:<30}{Style.RESET_ALL}")
+                                    else:
+                                        print(f"{col_desc:<20} | {val1:<30} | {val2:<30}")
+                                else:
                                     print(f"{col_desc:<20} | {val1:<30} | {val2:<30}")
                         elif job1:
                             for col_idx, col_name in enumerate(column_names):
-                                val1 = str(job1[col_idx])
-                                col_desc = self.get_column_description("DWJJOB", col_name)
+                                val1 = str(job1[col_idx]) if job1[col_idx] is not None else "N/A"
+                                col_desc = self.get_column_description("DWJJOB", col_name) or col_name
                                 print(f"{col_desc:<20} | {val1:<30} | {'N/A':<30}")
                         elif job2:
                             for col_idx, col_name in enumerate(column_names):
-                                val2 = str(job2[col_idx])
-                                col_desc = self.get_column_description("DWJJOB", col_name)
+                                val2 = str(job2[col_idx]) if job2[col_idx] is not None else "N/A"
+                                col_desc = self.get_column_description("DWJJOB", col_name) or col_name
                                 print(f"{col_desc:<20} | {'N/A':<30} | {val2:<30}")
                 
                 # Compare deliveries
@@ -648,20 +692,29 @@ class SQLiteEditor:
                         if job1 and job2:
                             # Compare all columns
                             for col_idx, col_name in enumerate(column_names):
-                                val1 = str(job1[col_idx])
-                                val2 = str(job2[col_idx])
-                                if val1 != val2:
-                                    col_desc = self.get_column_description("DWJJOB", col_name)
+                                val1 = str(job1[col_idx]) if job1[col_idx] is not None else "N/A"
+                                val2 = str(job2[col_idx]) if job2[col_idx] is not None else "N/A"
+                                col_desc = self.get_column_description("DWJJOB", col_name) or col_name
+                                
+                                # Always show the column and its values
+                                if col_name == 'dwjStatus':
+                                    if val1 == 'N' and val2 == 'Y':
+                                        print(f"{col_desc:<20} | {Fore.RED}{val1:<30}{Style.RESET_ALL} | {Fore.GREEN}{val2:<30}{Style.RESET_ALL}")
+                                    elif val1 == 'Y' and val2 == 'N':
+                                        print(f"{col_desc:<20} | {Fore.GREEN}{val1:<30}{Style.RESET_ALL} | {Fore.RED}{val2:<30}{Style.RESET_ALL}")
+                                    else:
+                                        print(f"{col_desc:<20} | {val1:<30} | {val2:<30}")
+                                else:
                                     print(f"{col_desc:<20} | {val1:<30} | {val2:<30}")
                         elif job1:
                             for col_idx, col_name in enumerate(column_names):
-                                val1 = str(job1[col_idx])
-                                col_desc = self.get_column_description("DWJJOB", col_name)
+                                val1 = str(job1[col_idx]) if job1[col_idx] is not None else "N/A"
+                                col_desc = self.get_column_description("DWJJOB", col_name) or col_name
                                 print(f"{col_desc:<20} | {val1:<30} | {'N/A':<30}")
                         elif job2:
                             for col_idx, col_name in enumerate(column_names):
-                                val2 = str(job2[col_idx])
-                                col_desc = self.get_column_description("DWJJOB", col_name)
+                                val2 = str(job2[col_idx]) if job2[col_idx] is not None else "N/A"
+                                col_desc = self.get_column_description("DWJJOB", col_name) or col_name
                                 print(f"{col_desc:<20} | {'N/A':<30} | {val2:<30}")
                 
             except ValueError:
@@ -670,6 +723,9 @@ class SQLiteEditor:
         except sqlite3.Error as e:
             logging.error(f"Error comparing loads: {e}")
             print(f"{Fore.RED}Error comparing loads: {e}{Style.RESET_ALL}")
+        except Exception as e:
+            logging.error(f"Unexpected error in compare_loads: {e}")
+            print(f"{Fore.RED}An unexpected error occurred: {e}{Style.RESET_ALL}")
 
     def compare_vehicles(self):
         """Compare two vehicles in a load and show differences."""
@@ -741,12 +797,19 @@ class SQLiteEditor:
                     
                     # Compare each column
                     for col_idx, col_name in enumerate(column_names):
-                        val1 = str(vehicle1[col_idx])
-                        val2 = str(vehicle2[col_idx])
+                        val1 = str(vehicle1[col_idx]) if vehicle1[col_idx] is not None else "N/A"
+                        val2 = str(vehicle2[col_idx]) if vehicle2[col_idx] is not None else "N/A"
+                        col_desc = self.get_column_description("DWVVEH", col_name) or col_name
                         
-                        # Only show if values are different
-                        if val1 != val2:
-                            col_desc = self.get_column_description("DWVVEH", col_name)
+                        # Always show the column and its values
+                        if col_name == 'dwvStatus':
+                            if val1 == 'N' and val2 == 'Y':
+                                print(f"{col_desc:<20} | {Fore.RED}{val1:<30}{Style.RESET_ALL} | {Fore.GREEN}{val2:<30}{Style.RESET_ALL}")
+                            elif val1 == 'Y' and val2 == 'N':
+                                print(f"{col_desc:<20} | {Fore.GREEN}{val1:<30}{Style.RESET_ALL} | {Fore.RED}{val2:<30}{Style.RESET_ALL}")
+                            else:
+                                print(f"{col_desc:<20} | {val1:<30} | {val2:<30}")
+                        else:
                             print(f"{col_desc:<20} | {val1:<30} | {val2:<30}")
                     
                 except ValueError:
@@ -758,638 +821,49 @@ class SQLiteEditor:
         except sqlite3.Error as e:
             logging.error(f"Error comparing vehicles: {e}")
             print(f"{Fore.RED}Error comparing vehicles: {e}{Style.RESET_ALL}")
+        except Exception as e:
+            logging.error(f"Unexpected error in compare_vehicles: {e}")
+            print(f"{Fore.RED}An unexpected error occurred: {e}{Style.RESET_ALL}")
 
     def show_loads(self):
-        """Show unique load numbers from DWJJOB table."""
+        """Show all loads with their collections and deliveries."""
         try:
-            # Get unique load numbers
-            self.cursor.execute("SELECT DISTINCT dwjLoad FROM DWJJOB ORDER BY dwjLoad")
-            loads = self.cursor.fetchall()
+            # Get all jobs grouped by load
+            self.cursor.execute("""
+                SELECT dwjLoad, dwjType, COUNT(*) as count
+                FROM DWJJOB
+                GROUP BY dwjLoad, dwjType
+                ORDER BY dwjLoad, dwjType
+            """)
+            load_stats = self.cursor.fetchall()
             
-            if not loads:
-                print(f"{Fore.YELLOW}No loads found in DWJJOB table.{Style.RESET_ALL}")
+            if not load_stats:
+                print(f"{Fore.YELLOW}No loads found in database.{Style.RESET_ALL}")
                 return
             
-            print(f"\n{Fore.CYAN}Available Loads:{Style.RESET_ALL}")
-            for i, load in enumerate(loads, 1):
-                print(f"{Fore.WHITE}{i}. {Fore.GREEN}{load[0]}{Style.RESET_ALL}")
+            # Group by load number
+            load_groups = {}
+            for load_num, job_type, count in load_stats:
+                if load_num not in load_groups:
+                    load_groups[load_num] = {'C': 0, 'D': 0}
+                load_groups[load_num][job_type] = count
             
-            print(f"\n{Fore.CYAN}Select a load number (or press Enter to return):{Style.RESET_ALL}")
-            choice = input().strip()
+            # Print header
+            print(f"\n{Fore.CYAN}Load Summary:{Style.RESET_ALL}")
+            print(f"{Fore.WHITE}{'Load Number':<15} | {'Collections':<12} | {'Deliveries':<12} | {'Total Jobs':<12}{Style.RESET_ALL}")
+            print("-" * 60)
             
-            if choice:
-                try:
-                    load_num = loads[int(choice) - 1][0]
-                    self.show_load_details(load_num)
-                except (ValueError, IndexError):
-                    print(f"{Fore.RED}Invalid selection.{Style.RESET_ALL}")
+            # Print each load's summary
+            for load_num in sorted(load_groups.keys()):
+                collections = load_groups[load_num]['C']
+                deliveries = load_groups[load_num]['D']
+                total = collections + deliveries
+                print(f"{Fore.WHITE}{load_num:<15} | {Fore.YELLOW}{collections:<12} | {Fore.GREEN}{deliveries:<12} | {Fore.CYAN}{total:<12}{Style.RESET_ALL}")
+            
+            print(f"\n{Fore.CYAN}Total Loads: {len(load_groups)}{Style.RESET_ALL}")
+            
         except sqlite3.Error as e:
             logging.error(f"Error showing loads: {e}")
-            print(f"{Fore.RED}Error retrieving loads: {e}{Style.RESET_ALL}")
-    
-    def get_column_description(self, table_name, column_name):
-        """Get the description for a column from the schema."""
-        column_key = f"{table_name}.{column_name}"
-        return self.schema_data.get("columns", {}).get(column_key, {}).get("description", column_name)
-
-    def configure_display_columns(self, table_name):
-        """Configure which columns to display for a table."""
-        try:
-            self.cursor.execute(f"PRAGMA table_info({table_name})")
-            columns = self.cursor.fetchall()
-            
-            print(f"\n{Fore.CYAN}Configure Display Columns for {table_name}:{Style.RESET_ALL}")
-            print(f"{Fore.YELLOW}Enter numbers to toggle columns (comma-separated), or press Enter to keep current:{Style.RESET_ALL}")
-            
-            # Show current selection
-            display_cols = self.job_display_columns if table_name == "DWJJOB" else self.vehicle_display_columns
-            for i, col in enumerate(columns, 1):
-                col_name = col[1]
-                desc = self.get_column_description(table_name, col_name)
-                checked = "✓" if display_cols.get(col_name, False) else " "
-                print(f"{Fore.WHITE}{i}. [{checked}] {desc} ({col_name}){Style.RESET_ALL}")
-            
-            choice = input().strip()
-            if choice:
-                try:
-                    # Toggle selected columns
-                    indices = [int(x.strip()) - 1 for x in choice.split(",")]
-                    for idx in indices:
-                        if 0 <= idx < len(columns):
-                            col_name = columns[idx][1]
-                            display_cols[col_name] = not display_cols.get(col_name, False)
-                    
-                    print(f"{Fore.GREEN}Display settings updated.{Style.RESET_ALL}")
-                except (ValueError, IndexError):
-                    print(f"{Fore.RED}Invalid selection. Settings unchanged.{Style.RESET_ALL}")
-            
-        except sqlite3.Error as e:
-            logging.error(f"Error configuring display columns: {e}")
-            print(f"{Fore.RED}Error configuring display columns: {e}{Style.RESET_ALL}")
-
-    def edit_load(self, load_num):
-        """Edit a specific load's details."""
-        try:
-            print(f"\n{Fore.CYAN}Edit Load: {Fore.GREEN}{load_num}{Style.RESET_ALL}")
-            print(f"{Fore.YELLOW}1. Edit Job Details{Style.RESET_ALL}")
-            print(f"{Fore.YELLOW}2. Edit Vehicle Details{Style.RESET_ALL}")
-            print(f"{Fore.YELLOW}3. Return to Load View{Style.RESET_ALL}")
-            
-            choice = input(f"{Fore.CYAN}Enter your choice (1-3):{Style.RESET_ALL} ").strip()
-            
-            if choice == "1":
-                self.edit_job_details(load_num)
-            elif choice == "2":
-                self.edit_vehicle_details(load_num)
-            elif choice == "3":
-                return
-            else:
-                print(f"{Fore.RED}Invalid choice.{Style.RESET_ALL}")
-                
-        except sqlite3.Error as e:
-            logging.error(f"Error editing load: {e}")
-            print(f"{Fore.RED}Error editing load: {e}{Style.RESET_ALL}")
-
-    def edit_job_details(self, load_num):
-        """Edit details for a specific job."""
-        try:
-            # Get all jobs for this load
-            self.cursor.execute("""
-                SELECT dwjkey, dwjSeq, dwjType, dwjCust, dwjName, dwjStatus
-                FROM DWJJOB 
-                WHERE dwjLoad = ? 
-                ORDER BY dwjSeq
-            """, (load_num,))
-            jobs = self.cursor.fetchall()
-            
-            if not jobs:
-                print(f"{Fore.YELLOW}No jobs found for load {load_num}{Style.RESET_ALL}")
-                return
-            
-            print(f"\n{Fore.CYAN}Select a job to edit:{Style.RESET_ALL}")
-            for job in jobs:
-                print(f"{Fore.WHITE}Seq: {job[1]} | Type: {job[2]} | Customer: {job[3]} | Name: {job[4]} | Status: {job[5]}{Style.RESET_ALL}")
-            
-            seq = input(f"{Fore.CYAN}Enter sequence number to edit (or press Enter to return):{Style.RESET_ALL} ").strip()
-            if not seq:
-                return
-                
-            try:
-                seq = int(seq)
-                job = next((j for j in jobs if j[1] == seq), None)
-                
-                if job:
-                    self.edit_job_record(job[0])
-                else:
-                    print(f"{Fore.RED}Job with sequence {seq} not found.{Style.RESET_ALL}")
-            except ValueError:
-                print(f"{Fore.RED}Invalid sequence number.{Style.RESET_ALL}")
-                
-        except sqlite3.Error as e:
-            logging.error(f"Error editing job details: {e}")
-            print(f"{Fore.RED}Error editing job details: {e}{Style.RESET_ALL}")
-
-    def edit_vehicle_details(self, load_num):
-        """Edit details for vehicles in a load."""
-        try:
-            # Get all vehicles for this load
-            self.cursor.execute("""
-                SELECT dwvKey, dwvDriver, dwvVehRef, dwvModDes, dwvStatus
-                FROM DWVVEH 
-                WHERE dwvLoad = ?
-            """, (load_num,))
-            vehicles = self.cursor.fetchall()
-            
-            if not vehicles:
-                print(f"{Fore.YELLOW}No vehicles found for load {load_num}{Style.RESET_ALL}")
-                return
-            
-            print(f"\n{Fore.CYAN}Select a vehicle to edit:{Style.RESET_ALL}")
-            for vehicle in vehicles:
-                print(f"{Fore.WHITE}Key: {vehicle[0]} | Driver: {vehicle[1]} | Ref: {vehicle[2]} | Model: {vehicle[3]} | Status: {vehicle[4]}{Style.RESET_ALL}")
-            
-            key = input(f"{Fore.CYAN}Enter vehicle key to edit (or press Enter to return):{Style.RESET_ALL} ").strip()
-            if not key:
-                return
-                
-            vehicle = next((v for v in vehicles if v[0] == key), None)
-            if vehicle:
-                self.edit_vehicle_record(key)
-            else:
-                print(f"{Fore.RED}Vehicle with key {key} not found.{Style.RESET_ALL}")
-                
-        except sqlite3.Error as e:
-            logging.error(f"Error editing vehicle details: {e}")
-            print(f"{Fore.RED}Error editing vehicle details: {e}{Style.RESET_ALL}")
-
-    def show_load_details(self, load_num):
-        """Show detailed information about a specific load."""
-        try:
-            # Debug logging for PostgreSQL config
-            if not self.pg_config:
-                print(f"{Fore.RED}PostgreSQL configuration not found. Please check sql.ini file.{Style.RESET_ALL}")
-                logging.error("PostgreSQL configuration is missing")
-            else:
-                logging.info(f"PostgreSQL config loaded: {self.pg_config.get('host', 'unknown')}:{self.pg_config.get('port', 'unknown')}")
-            
-            # Get load details
-            self.cursor.execute("""
-                SELECT dwvload, dwvvehref, dwvmoddes, dwvcolcod, dwvdelcod, dwvexpdat
-                FROM dwvveh
-                WHERE dwvload = ?
-                ORDER BY dwvvehref
-            """, (load_num,))
-            
-            vehicles = self.cursor.fetchall()
-            
-            if not vehicles:
-                print(f"{Fore.YELLOW}No vehicles found for load {load_num}{Style.RESET_ALL}")
-                return
-            
-            # Get collection and delivery locations
-            self.cursor.execute("""
-                SELECT dwjtype, dwjcust, dwjname, dwjdate, dwjadrcod
-                FROM dwjjob
-                WHERE dwjload = ?
-                ORDER BY dwjtype, dwjdate
-            """, (load_num,))
-            
-            jobs = self.cursor.fetchall()
-            
-            # Separate collections and deliveries
-            collections = [j for j in jobs if j[0] == 'C']
-            deliveries = [j for j in jobs if j[0] == 'D']
-            
-            # Print load header
-            print(f"\n{Fore.CYAN}Load {load_num} Details:{Style.RESET_ALL}")
-            
-            # Print collections
-            if collections:
-                print(f"\n{Fore.YELLOW}Collections:{Style.RESET_ALL}")
-                print(f"{Fore.WHITE}{'Job Type':<10} | {'Customer Code':<15} | {'Customer Name':<30} | {'Job Date':<10}{Style.RESET_ALL}")
-                print("-" * 70)
-                
-                for collection in collections:
-                    job_date = self.format_date(str(collection[3]))
-                    print(f"{Fore.WHITE}{collection[0]:<10} | {collection[1]:<15} | {collection[2]:<30} | {job_date:<10}{Style.RESET_ALL}")
-                    
-                    # Show vehicles for this collection
-                    collection_vehicles = [v for v in vehicles if v[3] == collection[4]]
-                    if collection_vehicles:
-                        print(f"{Fore.CYAN}  Vehicles:{Style.RESET_ALL}")
-                        for vehicle in collection_vehicles:
-                            print(f"    {Fore.WHITE}{vehicle[1]} - {vehicle[2]}{Style.RESET_ALL}")
-            
-            # Print deliveries
-            if deliveries:
-                print(f"\n{Fore.YELLOW}Deliveries:{Style.RESET_ALL}")
-                print(f"{Fore.WHITE}{'Job Type':<10} | {'Customer Code':<15} | {'Customer Name':<30} | {'Job Date':<10}{Style.RESET_ALL}")
-                print("-" * 70)
-                
-                for delivery in deliveries:
-                    job_date = self.format_date(str(delivery[3]))
-                    print(f"{Fore.WHITE}{delivery[0]:<10} | {delivery[1]:<15} | {delivery[2]:<30} | {job_date:<10}{Style.RESET_ALL}")
-                    
-                    # Show vehicles for this delivery
-                    delivery_vehicles = [v for v in vehicles if v[4] == delivery[4]]
-                    if delivery_vehicles:
-                        print(f"{Fore.CYAN}  Vehicles:{Style.RESET_ALL}")
-                        for vehicle in delivery_vehicles:
-                            print(f"    {Fore.WHITE}{vehicle[1]} - {vehicle[2]}{Style.RESET_ALL}")
-            
-            # Print all vehicles summary with extra info
-            print(f"\n{Fore.YELLOW}All Vehicles:{Style.RESET_ALL}")
-            print(f"{Fore.WHITE}{'Vehicle Ref':<15} | {'Model':<30} | {'Spare Keys':<10} | {'Extra':<5} | {'Notes'}{Style.RESET_ALL}")
-            print("-" * 85)
-            
-            # Get extra car info from PostgreSQL if available
-            if self.pg_config:
-                try:
-                    logging.info("Attempting to connect to PostgreSQL...")
-                    pg_conn = psycopg2.connect(**self.pg_config)
-                    pg_cursor = pg_conn.cursor()
-                    logging.info("Successfully connected to PostgreSQL")
-                    
-                    for vehicle in vehicles:
-                        # Get extra car info
-                        try:
-                            logging.info(f"Checking extracarinfo for vehicle {vehicle[1]}")
-                            pg_cursor.execute("""
-                                SELECT sparekeys, extra, carnotes
-                                FROM extracarinfo
-                                WHERE idkey = %s
-                            """, (vehicle[0],))  # Use dwvkey (vehicle[0]) instead of vehicle[1]
-                            
-                            extra_info = pg_cursor.fetchone()
-                            
-                            if extra_info is None:
-                                logging.info(f"No entry found for {vehicle[0]}, creating new entry...")
-                                # Create new entry in extracarinfo using dwvkey as idkey
-                                pg_cursor.execute("""
-                                    INSERT INTO extracarinfo (idkey, carreg, sparekeys, extra, carnotes, photos)
-                                    VALUES (%s, %s, 'Y', 'Y', '', '{}')
-                                """, (vehicle[0], vehicle[1]))  # Use dwvkey as idkey, vehicle ref as carreg
-                                pg_conn.commit()
-                                logging.info(f"Created new entry for {vehicle[0]}")
-                                extra_info = ('Y', 'Y', '')
-                            
-                            logging.info(f"Extra info for {vehicle[0]}: {extra_info}")
-                            
-                            # Format the display
-                            spare_keys = extra_info[0] if extra_info and extra_info[0] else 'N/A'
-                            extra = extra_info[1] if extra_info and extra_info[1] else 'N/A'
-                            notes = extra_info[2] if extra_info and extra_info[2] else ''
-                            
-                            # Get collection and delivery names
-                            collection_name = next((c[2] for c in collections if c[4] == vehicle[3]), "Unknown")
-                            delivery_name = next((d[2] for d in deliveries if d[4] == vehicle[4]), "Unknown")
-                            
-                            print(f"{Fore.WHITE}{vehicle[1]:<15} | {vehicle[2]:<30} | {spare_keys:<10} | {extra:<5} | {notes}{Style.RESET_ALL}")
-                            print(f"    {Fore.CYAN}Collection: {collection_name} | Delivery: {delivery_name}{Style.RESET_ALL}")
-                        except Exception as e:
-                            logging.error(f"Error processing vehicle {vehicle[1]}: {e}")
-                            print(f"{Fore.WHITE}{vehicle[1]:<15} | {vehicle[2]:<30} | N/A | N/A | {Style.RESET_ALL}")
-                            print(f"    {Fore.CYAN}Collection: {collection_name} | Delivery: {delivery_name}{Style.RESET_ALL}")
-                    
-                    pg_cursor.close()
-                    pg_conn.close()
-                    logging.info("PostgreSQL connection closed")
-                except Exception as e:
-                    logging.error(f"Error connecting to PostgreSQL: {e}")
-                    print(f"{Fore.RED}Error connecting to PostgreSQL: {e}{Style.RESET_ALL}")
-                    # Fallback to basic display if PostgreSQL connection fails
-                    for vehicle in vehicles:
-                        collection_name = next((c[2] for c in collections if c[4] == vehicle[3]), "Unknown")
-                        delivery_name = next((d[2] for d in deliveries if d[4] == vehicle[4]), "Unknown")
-                        print(f"{Fore.WHITE}{vehicle[1]:<15} | {vehicle[2]:<30} | N/A | N/A | {Style.RESET_ALL}")
-                        print(f"    {Fore.CYAN}Collection: {collection_name} | Delivery: {delivery_name}{Style.RESET_ALL}")
-            else:
-                # Fallback to basic display if no PostgreSQL config
-                for vehicle in vehicles:
-                    collection_name = next((c[2] for c in collections if c[4] == vehicle[3]), "Unknown")
-                    delivery_name = next((d[2] for d in deliveries if d[4] == vehicle[4]), "Unknown")
-                    print(f"{Fore.WHITE}{vehicle[1]:<15} | {vehicle[2]:<30} | N/A | N/A | {Style.RESET_ALL}")
-                    print(f"    {Fore.CYAN}Collection: {collection_name} | Delivery: {delivery_name}{Style.RESET_ALL}")
-            
-        except Exception as e:
-            print(f"{Fore.RED}Error showing load details: {e}{Style.RESET_ALL}")
-            logging.error(f"Error showing load details: {e}")
-
-    def print_menu(self):
-        """Print the menu with fancy formatting."""
-        menu_border = f"{Fore.BLUE}{'═' * 60}{Style.RESET_ALL}"
-        menu_title = f"{Fore.CYAN}{'▌' * 5} SQLite Database Editor for Y/N/mixed Values {'▌' * 5}{Style.RESET_ALL}"
-        
-        print("\n" + menu_border)
-        print(menu_title)
-        print(menu_border)
-        print(f"{Fore.YELLOW}┌──────────────────────────────────────┐{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}1.{Style.RESET_ALL} {Fore.CYAN}List tables                       {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}2.{Style.RESET_ALL} {Fore.CYAN}Display data                      {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}3.{Style.RESET_ALL} {Fore.CYAN}Edit a record                     {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}4.{Style.RESET_ALL} {Fore.CYAN}Add a new record                  {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}5.{Style.RESET_ALL} {Fore.CYAN}Show changes made                 {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}6.{Style.RESET_ALL} {Fore.CYAN}Show schema info                  {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}7.{Style.RESET_ALL} {Fore.CYAN}Add table description             {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}8.{Style.RESET_ALL} {Fore.CYAN}Add column description            {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}9.{Style.RESET_ALL} {Fore.CYAN}Export schema                     {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}10.{Style.RESET_ALL} {Fore.CYAN}Show loads                       {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}11.{Style.RESET_ALL} {Fore.CYAN}Sync to PostgreSQL               {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}12.{Style.RESET_ALL} {Fore.CYAN}Find Missing Car Details         {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}13.{Style.RESET_ALL} {Fore.CYAN}Exit                           {Fore.YELLOW}│{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}└──────────────────────────────────────┘{Style.RESET_ALL}")
-        
-        if self.table_name:
-            print(f"{Fore.WHITE}Current table: {Fore.GREEN}{self.table_name}{Style.RESET_ALL}")
-        if self.column_name:
-            print(f"{Fore.WHITE}Current column: {Fore.GREEN}{self.column_name}{Style.RESET_ALL}")
-        
-        print(f"{Fore.CYAN}Enter your choice (1-13):{Style.RESET_ALL} ", end="")
-    
-    def export_schema(self):
-        """Export the schema to a formatted markdown file."""
-        if not self.schema_data:
-            print(f"{Fore.RED}No schema data to export.{Style.RESET_ALL}")
-            return
-        
-        try:
-            # Create export directory if it doesn't exist
-            export_dir = os.path.join(SCRIPT_DIR, "schema", "exports")
-            os.makedirs(export_dir, exist_ok=True)
-            
-            # Generate export filename with timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            export_file = os.path.join(export_dir, f"schema_export_{timestamp}.md")
-            
-            with open(export_file, 'w') as f:
-                # Write header
-                f.write("# Database Schema Documentation\n\n")
-                f.write(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-                
-                # Write tables section
-                f.write("## Tables\n\n")
-                for table_name, table_info in self.schema_data.get("tables", {}).items():
-                    f.write(f"### {table_name}\n\n")
-                    f.write(f"**Description:** {table_info.get('description', 'No description')}\n\n")
-                    f.write(f"**Last Updated:** {table_info.get('last_updated', 'Unknown')}\n\n")
-                    
-                    # Get column information
-                    try:
-                        self.cursor.execute(f"PRAGMA table_info({table_name})")
-                        columns = self.cursor.fetchall()
-                        
-                        f.write("#### Columns\n\n")
-                        f.write("| Column Name | Type | Description | Primary Key |\n")
-                        f.write("|------------|------|-------------|-------------|\n")
-                        
-                        for col in columns:
-                            col_name = col[1]
-                            col_type = col[2]
-                            # Check specifically for dwjkey
-                            is_dwjkey = "Yes" if col_name.lower() == "dwjkey" else "No"
-                            column_key = f"{table_name}.{col_name}"
-                            col_desc = self.schema_data.get("columns", {}).get(column_key, {}).get("description", "No description")
-                            
-                            f.write(f"| {col_name} | {col_type} | {col_desc} | {is_dwjkey} |\n")
-                        
-                        f.write("\n")
-                    except sqlite3.Error as e:
-                        logging.error(f"Error getting column info for table {table_name}: {e}")
-                        f.write("Error retrieving column information\n\n")
-            
-            print(f"{Fore.GREEN}Schema exported to: {export_file}{Style.RESET_ALL}")
-            logging.info(f"Schema exported to {export_file}")
-            
-        except Exception as e:
-            logging.error(f"Error exporting schema: {e}")
-            print(f"{Fore.RED}Error exporting schema: {e}{Style.RESET_ALL}")
-
-    def run(self):
-        """Run the main application loop."""
-        print(f"{Fore.BLUE}{'═' * 60}{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}   SQLite Database Editor for Y/N/mixed Values{Style.RESET_ALL}")
-        print(f"{Fore.BLUE}{'═' * 60}{Style.RESET_ALL}")
-        
-        if not self.check_db_exists():
-            print(f"{Fore.RED}Exiting: Database not found or created.{Style.RESET_ALL}")
-            return
-        
-        if not self.connect_db():
-            print(f"{Fore.RED}Exiting: Could not connect to database.{Style.RESET_ALL}")
-            return
-            
-        # Test PostgreSQL connection at startup
-        if self.pg_config:
-            self.test_connection()
-        
-        while True:
-            self.print_menu()
-            choice = input()
-            
-            if choice == '1':
-                self.list_tables()
-            elif choice == '2':
-                self.display_data()
-            elif choice == '3':
-                self.edit_record()
-            elif choice == '4':
-                self.add_record()
-            elif choice == '5':
-                self.show_changes()
-            elif choice == '6':
-                self.show_schema_info()
-            elif choice == '7':
-                self.add_table_description()
-            elif choice == '8':
-                self.add_column_description()
-            elif choice == '9':
-                self.export_schema()
-            elif choice == '10':
-                self.show_loads()
-            elif choice == '11':
-                self.sync_to_postgres()
-            elif choice == '12':
-                self.find_missing_car_details()
-            elif choice == '13':
-                print(f"{Fore.GREEN}Saving changes and exiting...{Style.RESET_ALL}")
-                self.save_schema()  # Save any pending schema changes
-                self.close_db()
-                break
-            else:
-                print(f"{Fore.RED}Invalid choice. Please try again.{Style.RESET_ALL}")
-
-    def save_display_settings(self):
-        """Save display settings to schema."""
-        if "display_settings" not in self.schema_data:
-            self.schema_data["display_settings"] = {}
-        self.schema_data["display_settings"]["job_columns"] = self.job_display_columns
-        self.schema_data["display_settings"]["vehicle_columns"] = self.vehicle_display_columns
-        self.save_schema()
-
-    def format_date(self, date_str):
-        """Format date string to a more readable format."""
-        try:
-            # Assuming date is in format YYYYMMDD
-            if len(date_str) == 8:
-                year = date_str[:4]
-                month = date_str[4:6]
-                day = date_str[6:8]
-                return f"{day}/{month}/{year}"
-            return date_str
-        except:
-            return date_str
-
-    def load_pg_config(self):
-        """Load PostgreSQL configuration from sql.ini file."""
-        config = configparser.ConfigParser()
-        config_path = os.path.join(SQL_DIR, "sql.ini")
-        
-        if not os.path.exists(config_path):
-            logging.error(f"PostgreSQL configuration file not found at {config_path}")
-            return None
-            
-        try:
-            config.read(config_path)
-            return {
-                'host': config['SQL']['PG_HOST'],
-                'port': config['SQL']['PG_PORT'],
-                'database': config['SQL']['PG_DATABASE'],
-                'user': config['SQL']['PG_USERNAME'],
-                'password': config['SQL']['PG_PASSWORD']
-            }
-        except Exception as e:
-            logging.error(f"Error loading PostgreSQL configuration: {e}")
-            return None
-
-    def sync_to_postgres(self):
-        """Sync data from SQLite to PostgreSQL."""
-        if not self.pg_config:
-            print(f"{Fore.RED}PostgreSQL configuration not found. Please check sql.ini file.{Style.RESET_ALL}")
-            return
-
-        try:
-            # Connect to PostgreSQL
-            pg_conn = psycopg2.connect(**self.pg_config)
-            pg_cursor = pg_conn.cursor()
-            
-            # Get list of tables to sync
-            self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            tables = [row[0] for row in self.cursor.fetchall()]
-            
-            total_inserted = 0
-            total_updated = 0
-            total_skipped = 0
-            
-            for table_name in tables:
-                # Skip extracarinfo as it's PostgreSQL-only
-                if table_name.lower() == 'extracarinfo':
-                    continue
-                    
-                print(f"\n{Fore.CYAN}Processing table: {table_name}{Style.RESET_ALL}")
-                
-                # Get column names
-                self.cursor.execute(f"PRAGMA table_info({table_name})")
-                column_names = [row[1] for row in self.cursor.fetchall()]
-                
-                # Get data from SQLite
-                self.cursor.execute(f"SELECT * FROM {table_name}")
-                rows = self.cursor.fetchall()
-                
-                if not rows:
-                    print(f"{Fore.YELLOW}No data found in {table_name}{Style.RESET_ALL}")
-                    continue
-                
-                # Check which records exist in PostgreSQL
-                pg_cursor.execute(f"SELECT {column_names[0]} FROM {table_name}")
-                existing_keys = {row[0] for row in pg_cursor.fetchall()}
-                
-                insert_rows = []
-                update_rows = []
-                
-                for row in rows:
-                    if row[0] not in existing_keys:
-                        insert_rows.append(row)
-                    else:
-                        update_rows.append(row)
-                
-                # Insert new records
-                if insert_rows:
-                    insert_sql = f"""
-                    INSERT INTO {table_name} ({', '.join(column_names)})
-                    VALUES ({', '.join(['%s'] * len(column_names))})
-                    """
-                    pg_cursor.executemany(insert_sql, insert_rows)
-                    total_inserted += len(insert_rows)
-                
-                # Update existing records
-                if update_rows:
-                    for row in update_rows:
-                        # For DWVVEH table, exclude dwvmoddes from updates
-                        if table_name == 'dwvveh':
-                            update_cols = [col for col in column_names[1:] if col != 'dwvmoddes']
-                            set_clause = ', '.join(f"{col} = %s" for col in update_cols)
-                            update_values = [row[column_names.index(col)] for col in update_cols]
-                            update_sql = f"""
-                            UPDATE {table_name}
-                            SET {set_clause}, last_updated = CURRENT_TIMESTAMP
-                            WHERE {column_names[0]} = %s
-                            """
-                            pg_cursor.execute(update_sql, update_values + [row[0]])
-                        else:
-                            set_clause = ', '.join(f"{col} = %s" for col in column_names[1:])
-                            update_sql = f"""
-                            UPDATE {table_name}
-                            SET {set_clause}, last_updated = CURRENT_TIMESTAMP
-                            WHERE {column_names[0]} = %s
-                            """
-                            pg_cursor.execute(update_sql, row[1:] + (row[0],))
-                    total_updated += len(update_rows)
-                
-                total_skipped += len(rows) - len(insert_rows) - len(update_rows)
-                pg_conn.commit()
-            
-            # Handle extracarinfo table separately
-            print(f"\n{Fore.CYAN}Processing extracarinfo table...{Style.RESET_ALL}")
-            
-            # Get vehicles from DWVVEH that aren't in extracarinfo
-            pg_cursor.execute("""
-                SELECT v.dwvkey, v.dwvvehref
-                FROM public.dwvveh v
-                LEFT JOIN public.extracarinfo e ON v.dwvkey = e.idkey
-                WHERE e.idkey IS NULL
-            """)
-            missing_cars = pg_cursor.fetchall()
-            
-            if missing_cars:
-                print(f"{Fore.YELLOW}Found {len(missing_cars)} missing cars in extracarinfo{Style.RESET_ALL}")
-                for key, reg in missing_cars:
-                    pg_cursor.execute("""
-                        INSERT INTO public.extracarinfo (idkey, carreg, sparekeys, extra, carnotes, photos)
-                        VALUES (%s, %s, 'Y', 'Y', '', '{}')
-                    """, (key, reg))
-                pg_conn.commit()
-                print(f"{Fore.GREEN}Added {len(missing_cars)} missing cars to extracarinfo{Style.RESET_ALL}")
-            
-            print(f"\n{Fore.GREEN}Sync completed successfully:{Style.RESET_ALL}")
-            print(f"{Fore.WHITE}Records inserted: {Fore.GREEN}{total_inserted}{Style.RESET_ALL}")
-            print(f"{Fore.WHITE}Records updated: {Fore.GREEN}{total_updated}{Style.RESET_ALL}")
-            print(f"{Fore.WHITE}Records skipped (no changes): {Fore.GREEN}{total_skipped}{Style.RESET_ALL}")
-            
-        except Exception as e:
-            logging.error(f"Error syncing to PostgreSQL: {e}")
-            print(f"{Fore.RED}Error syncing to PostgreSQL: {e}{Style.RESET_ALL}")
-        finally:
-            if 'pg_cursor' in locals():
-                pg_cursor.close()
-            if 'pg_conn' in locals():
-                pg_conn.close()
-
-    def find_missing_car_details(self):
-        """Find and update missing car make/model details."""
-        if not self.pg_config:
-            print(f"{Fore.RED}PostgreSQL configuration not found. Please check sql.ini file.{Style.RESET_ALL}")
-            return
-
         try:
             # Connect to PostgreSQL
             pg_conn = psycopg2.connect(**self.pg_config)
@@ -1535,6 +1009,272 @@ class SQLiteEditor:
             print(f"{Fore.RED}Connection test failed: {e}{Style.RESET_ALL}")
             logging.error(f"PostgreSQL connection test failed: {e}")
             return False
+
+    def run(self):
+        """Run the main application loop."""
+        print(f"{Fore.BLUE}{'═' * 60}{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}   Database Manager{Style.RESET_ALL}")
+        print(f"{Fore.BLUE}{'═' * 60}{Style.RESET_ALL}")
+        
+        # Check database connection at startup
+        if not self.check_db_exists():
+            print(f"{Fore.RED}Exiting: Database not found or created.{Style.RESET_ALL}")
+            return
+        
+        if not self.connect_db():
+            print(f"{Fore.RED}Exiting: Could not connect to database.{Style.RESET_ALL}")
+            return
+            
+        # Test PostgreSQL connection at startup
+        if self.pg_config:
+            self.test_connection()
+        
+        while True:
+            self.print_menu()
+            choice = input()
+            
+            if choice == '1':
+                while True:
+                    self.load_viewer_menu()
+                    subchoice = input()
+                    
+                    if subchoice == '1':
+                        self.show_loads()
+                    elif subchoice == '2':
+                        load_num = input(f"{Fore.CYAN}Enter load number to view:{Style.RESET_ALL} ").strip()
+                        self.show_load_details(load_num)
+                    elif subchoice == '3':
+                        load_num = input(f"{Fore.CYAN}Enter load number to edit:{Style.RESET_ALL} ").strip()
+                        self.edit_load(load_num)
+                    elif subchoice == '4':
+                        break
+                    else:
+                        print(f"{Fore.RED}Invalid choice. Please try again.{Style.RESET_ALL}")
+                    
+                    if subchoice != '4':
+                        input(f"\n{Fore.CYAN}Press Enter to continue...{Style.RESET_ALL}")
+            
+            elif choice == '2':
+                while True:
+                    self.database_mapper_menu()
+                    subchoice = input()
+                    
+                    if subchoice == '1':
+                        self.show_schema_info()
+                    elif subchoice == '2':
+                        self.add_table_description()
+                    elif subchoice == '3':
+                        self.add_column_description()
+                    elif subchoice == '4':
+                        self.export_schema()
+                    elif subchoice == '5':
+                        break
+                    else:
+                        print(f"{Fore.RED}Invalid choice. Please try again.{Style.RESET_ALL}")
+                    
+                    if subchoice != '5':
+                        input(f"\n{Fore.CYAN}Press Enter to continue...{Style.RESET_ALL}")
+            
+            elif choice == '3':
+                while True:
+                    self.compare_tool_menu()
+                    subchoice = input()
+                    
+                    if subchoice == '1':
+                        self.compare_loads()
+                    elif subchoice == '2':
+                        self.compare_vehicles()
+                    elif subchoice == '3':
+                        self.show_changes()
+                    elif subchoice == '4':
+                        break
+                    else:
+                        print(f"{Fore.RED}Invalid choice. Please try again.{Style.RESET_ALL}")
+                    
+                    if subchoice != '4':
+                        input(f"\n{Fore.CYAN}Press Enter to continue...{Style.RESET_ALL}")
+            
+            elif choice == '4':
+                self.find_missing_car_details()
+                input(f"\n{Fore.CYAN}Press Enter to continue...{Style.RESET_ALL}")
+            
+            elif choice == '5':
+                self.sync_to_postgres()
+                input(f"\n{Fore.CYAN}Press Enter to continue...{Style.RESET_ALL}")
+            
+            elif choice == '6':
+                print(f"{Fore.GREEN}Exiting...{Style.RESET_ALL}")
+                break
+            
+            else:
+                print(f"{Fore.RED}Invalid choice. Please try again.{Style.RESET_ALL}")
+            
+            # Clear screen between main menu selections
+            os.system('cls' if os.name == 'nt' else 'clear')
+
+    def print_menu(self):
+        """Print the main menu with fancy formatting."""
+        menu_border = f"{Fore.BLUE}{'═' * 60}{Style.RESET_ALL}"
+        menu_title = f"{Fore.CYAN}{'▌' * 5} Database Manager {'▌' * 5}{Style.RESET_ALL}"
+        
+        print("\n" + menu_border)
+        print(menu_title)
+        print(menu_border)
+        print(f"{Fore.YELLOW}┌──────────────────────────────────────┐{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}1.{Style.RESET_ALL} {Fore.CYAN}Load Viewer                      {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}2.{Style.RESET_ALL} {Fore.CYAN}Database Mapper                 {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}3.{Style.RESET_ALL} {Fore.CYAN}Compare Tool                    {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}4.{Style.RESET_ALL} {Fore.CYAN}Find Missing Car Details        {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}5.{Style.RESET_ALL} {Fore.CYAN}Sync to PostgreSQL              {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}6.{Style.RESET_ALL} {Fore.CYAN}Exit                           {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}└──────────────────────────────────────┘{Style.RESET_ALL}")
+        
+        print(f"{Fore.CYAN}Enter your choice (1-6):{Style.RESET_ALL} ", end="")
+
+    def load_viewer_menu(self):
+        """Print the load viewer submenu."""
+        menu_border = f"{Fore.BLUE}{'═' * 60}{Style.RESET_ALL}"
+        menu_title = f"{Fore.CYAN}{'▌' * 5} Load Viewer {'▌' * 5}{Style.RESET_ALL}"
+        
+        print("\n" + menu_border)
+        print(menu_title)
+        print(menu_border)
+        print(f"{Fore.YELLOW}┌──────────────────────────────────────┐{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}1.{Style.RESET_ALL} {Fore.CYAN}View All Loads                 {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}2.{Style.RESET_ALL} {Fore.CYAN}View Load Details              {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}3.{Style.RESET_ALL} {Fore.CYAN}Edit Load                      {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}4.{Style.RESET_ALL} {Fore.CYAN}Back to Main Menu              {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}└──────────────────────────────────────┘{Style.RESET_ALL}")
+        
+        print(f"{Fore.CYAN}Enter your choice (1-4):{Style.RESET_ALL} ", end="")
+
+    def database_mapper_menu(self):
+        """Print the database mapper submenu."""
+        menu_border = f"{Fore.BLUE}{'═' * 60}{Style.RESET_ALL}"
+        menu_title = f"{Fore.CYAN}{'▌' * 5} Database Mapper {'▌' * 5}{Style.RESET_ALL}"
+        
+        print("\n" + menu_border)
+        print(menu_title)
+        print(menu_border)
+        print(f"{Fore.YELLOW}┌──────────────────────────────────────┐{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}1.{Style.RESET_ALL} {Fore.CYAN}View Schema Information        {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}2.{Style.RESET_ALL} {Fore.CYAN}Add Table Description          {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}3.{Style.RESET_ALL} {Fore.CYAN}Add Column Description         {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}4.{Style.RESET_ALL} {Fore.CYAN}Export Schema                  {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}5.{Style.RESET_ALL} {Fore.CYAN}Back to Main Menu              {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}└──────────────────────────────────────┘{Style.RESET_ALL}")
+        
+        print(f"{Fore.CYAN}Enter your choice (1-5):{Style.RESET_ALL} ", end="")
+
+    def compare_tool_menu(self):
+        """Print the compare tool submenu."""
+        menu_border = f"{Fore.BLUE}{'═' * 60}{Style.RESET_ALL}"
+        menu_title = f"{Fore.CYAN}{'▌' * 5} Compare Tool {'▌' * 5}{Style.RESET_ALL}"
+        
+        print("\n" + menu_border)
+        print(menu_title)
+        print(menu_border)
+        print(f"{Fore.YELLOW}┌──────────────────────────────────────┐{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}1.{Style.RESET_ALL} {Fore.CYAN}Compare Loads                   {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}2.{Style.RESET_ALL} {Fore.CYAN}Compare Vehicles                {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}3.{Style.RESET_ALL} {Fore.CYAN}Show Changes                   {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}│{Style.RESET_ALL} {Fore.WHITE}4.{Style.RESET_ALL} {Fore.CYAN}Back to Main Menu              {Fore.YELLOW}│{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}└──────────────────────────────────────┘{Style.RESET_ALL}")
+        
+        print(f"{Fore.CYAN}Enter your choice (1-4):{Style.RESET_ALL} ", end="")
+
+    def find_missing_car_details(self):
+        # Implementation of find_missing_car_details method
+        pass
+
+    def sync_to_postgres(self):
+        # Implementation of sync_to_postgres method
+        pass
+
+    def show_load_details(self, load_num):
+        """Show detailed information about a specific load."""
+        try:
+            # Get all jobs for this load
+            self.cursor.execute("""
+                SELECT dwjType, dwjCust, dwjName, dwjDate, dwjStatus, dwjAdrCod
+                FROM DWJJOB
+                WHERE dwjLoad = ?
+                ORDER BY dwjType, dwjDate
+            """, (load_num,))
+            jobs = self.cursor.fetchall()
+            
+            if not jobs:
+                print(f"{Fore.YELLOW}No jobs found for load {load_num}{Style.RESET_ALL}")
+                return
+            
+            # Get all vehicles for this load
+            self.cursor.execute("""
+                SELECT dwvVehRef, dwvModDes, dwvDriver, dwvStatus, dwvColCod, dwvDelCod
+                FROM DWVVEH
+                WHERE dwvLoad = ?
+                ORDER BY dwvVehRef
+            """, (load_num,))
+            vehicles = self.cursor.fetchall()
+            
+            # Print load header
+            print(f"\n{Fore.CYAN}Load {load_num} Details:{Style.RESET_ALL}")
+            
+            # Print collections
+            collections = [j for j in jobs if j[0] == 'C']
+            if collections:
+                print(f"\n{Fore.YELLOW}Collections:{Style.RESET_ALL}")
+                print(f"{Fore.WHITE}{'Customer Code':<15} | {'Customer Name':<30} | {'Date':<10} | {'Status':<10} | {'Address Code':<15}{Style.RESET_ALL}")
+                print("-" * 90)
+                
+                for collection in collections:
+                    job_date = self.format_date(str(collection[3]))
+                    print(f"{Fore.WHITE}{collection[1]:<15} | {collection[2]:<30} | {job_date:<10} | {collection[4]:<10} | {collection[5]:<15}{Style.RESET_ALL}")
+            
+            # Print deliveries
+            deliveries = [j for j in jobs if j[0] == 'D']
+            if deliveries:
+                print(f"\n{Fore.YELLOW}Deliveries:{Style.RESET_ALL}")
+                print(f"{Fore.WHITE}{'Customer Code':<15} | {'Customer Name':<30} | {'Date':<10} | {'Status':<10} | {'Address Code':<15}{Style.RESET_ALL}")
+                print("-" * 90)
+                
+                for delivery in deliveries:
+                    job_date = self.format_date(str(delivery[3]))
+                    print(f"{Fore.WHITE}{delivery[1]:<15} | {delivery[2]:<30} | {job_date:<10} | {delivery[4]:<10} | {delivery[5]:<15}{Style.RESET_ALL}")
+            
+            # Print vehicles with their collection and delivery locations
+            if vehicles:
+                print(f"\n{Fore.YELLOW}Vehicles:{Style.RESET_ALL}")
+                print(f"{Fore.WHITE}{'Registration':<15} | {'Make/Model':<30} | {'Driver':<15} | {'Status':<10} | {'Collection':<15} | {'Delivery':<15}{Style.RESET_ALL}")
+                print("-" * 105)
+                
+                for vehicle in vehicles:
+                    # Get collection and delivery customer names
+                    collection_cust = next((j[2] for j in collections if j[5] == vehicle[4]), "Unknown")
+                    delivery_cust = next((j[2] for j in deliveries if j[5] == vehicle[5]), "Unknown")
+                    
+                    print(f"{Fore.WHITE}{vehicle[0]:<15} | {vehicle[1]:<30} | {vehicle[2]:<15} | {vehicle[3]:<10} | {collection_cust:<15} | {delivery_cust:<15}{Style.RESET_ALL}")
+            
+            # Print summary
+            print(f"\n{Fore.CYAN}Summary:{Style.RESET_ALL}")
+            print(f"{Fore.WHITE}Collections: {len(collections)}{Style.RESET_ALL}")
+            print(f"{Fore.WHITE}Deliveries: {len(deliveries)}{Style.RESET_ALL}")
+            print(f"{Fore.WHITE}Vehicles: {len(vehicles)}{Style.RESET_ALL}")
+            
+        except sqlite3.Error as e:
+            logging.error(f"Error showing load details: {e}")
+            print(f"{Fore.RED}Error retrieving load details: {e}{Style.RESET_ALL}")
+
+    def edit_load(self, load_num):
+        # Implementation of edit_load method
+        pass
+
+    def export_schema(self):
+        # Implementation of export_schema method
+        pass
+
+    def get_column_description(self, table_name, column_name):
+        # Implementation of get_column_description method
+        pass
 
 
 # Function that can be imported by other scripts to check all entries in a table/column

@@ -60,13 +60,15 @@ def log_message(message, level="INFO"):
     
     # Print to console with color based on level
     if level == "ERROR":
-        print(f"{Fore.RED}{formatted_message}{Style.RESET_ALL}")
+        print(f"{Fore.RED}{message}{Style.RESET_ALL}")
     elif level == "WARNING":
-        print(f"{Fore.YELLOW}{formatted_message}{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}{message}{Style.RESET_ALL}")
     elif level == "SUCCESS":
-        print(f"{Fore.GREEN}{formatted_message}{Style.RESET_ALL}")
+        print(f"{Fore.GREEN}{message}{Style.RESET_ALL}")
     else:
-        print(formatted_message)
+        # Don't print INFO messages to console unless they're important
+        if "Running ADB command" not in message:
+            print(message)
     
     # Write to log file
     with open(LOG_FILE, 'a') as log_file:
@@ -247,23 +249,92 @@ def uninstall_app(device=None):
         log_message(f"Failed to uninstall {APP_PACKAGE}", "ERROR")
         return False
 
+def is_app_running(device=None):
+    """Check if BCA Track app is running using multiple methods."""
+    cmd = "adb "
+    if device:
+        cmd += f"-s {device} "
+    
+    # Try multiple methods to check if app is running
+    methods = [
+        # Method 1: Check process without grep
+        f"{cmd}shell ps",
+        # Method 2: Check package state without grep
+        f"{cmd}shell dumpsys package {APP_PACKAGE}",
+        # Method 3: Check if app is in foreground without grep
+        f"{cmd}shell dumpsys window windows",
+        # Method 4: Check activity manager without grep
+        f"{cmd}shell dumpsys activity activities"
+    ]
+    
+    for method in methods:
+        try:
+            result = run_adb_command(method, shell=True)
+            if result and APP_PACKAGE in result:
+                return True
+        except:
+            continue
+    
+    # If none of the above methods work, try a simpler approach
+    try:
+        # Check if app is in the foreground
+        simple_cmd = f"{cmd}shell dumpsys window | findstr mCurrentFocus"
+        result = run_adb_command(simple_cmd, shell=True)
+        if result and APP_PACKAGE in result:
+            return True
+    except:
+        pass
+    
+    # Final check using a basic process list
+    try:
+        basic_cmd = f"{cmd}shell ps"
+        result = run_adb_command(basic_cmd, shell=True)
+        if result and APP_PACKAGE in result:
+            return True
+    except:
+        pass
+    
+    return False
+
 def grant_permissions(device=None):
     """Grant necessary permissions to the app."""
     permissions = [
         "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE"
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.MANAGE_EXTERNAL_STORAGE"  # Added for Android 11+
     ]
     
+    cmd = "adb "
+    if device:
+        cmd += f"-s {device} "
+    
     for permission in permissions:
-        cmd = "adb "
-        if device:
-            cmd += f"-s {device} "
-        cmd += f"shell pm grant {APP_PACKAGE} {permission}"
-        
-        if run_adb_command(cmd, check_output=False, shell=True):
+        # First try to grant normally
+        grant_cmd = f"{cmd}shell pm grant {APP_PACKAGE} {permission}"
+        if run_adb_command(grant_cmd, check_output=False, shell=True):
             log_message(f"Granted permission: {permission}", "SUCCESS")
         else:
-            log_message(f"Failed to grant permission: {permission}", "WARNING")
+            # If normal grant fails, try with root
+            root_cmd = f"{cmd}shell su 0 pm grant {APP_PACKAGE} {permission}"
+            if run_adb_command(root_cmd, check_output=False, shell=True):
+                log_message(f"Granted permission with root: {permission}", "SUCCESS")
+            else:
+                log_message(f"Failed to grant permission: {permission}", "WARNING")
+    
+    # For Android 11+, we need to request MANAGE_EXTERNAL_STORAGE through settings
+    try:
+        # Open app settings
+        settings_cmd = f"{cmd}shell am start -a android.settings.APPLICATION_DETAILS_SETTINGS -d package:{APP_PACKAGE}"
+        run_adb_command(settings_cmd, check_output=False, shell=True)
+        time.sleep(2)  # Give time for settings to open
+        
+        # Try to enable storage access
+        storage_cmd = f"{cmd}shell am start -a android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION"
+        run_adb_command(storage_cmd, check_output=False, shell=True)
+        
+        log_message("Please enable storage access in device settings if prompted", "INFO")
+    except:
+        log_message("Could not open storage settings automatically", "WARNING")
 
 def start_app(device=None):
     """Start the BCA Track app with improved error handling."""
@@ -283,49 +354,48 @@ def start_app(device=None):
         log_message(f"Failed to start app: {result}", "ERROR")
         return False
     
-    # Give app time to start
-    time.sleep(2)
+    # Give app more time to start (10 seconds)
+    log_message("Waiting for app to start...", "INFO")
+    time.sleep(10)
     
-    # Try multiple methods to verify app is running
-    verification_methods = [
-        # Method 1: Using ps with grep (but handle no matches gracefully)
-        f"{cmd}shell ps | grep {APP_PACKAGE} || true",
-        # Method 2: Using dumpsys to check app state
-        f"{cmd}shell dumpsys package {APP_PACKAGE} | grep 'state='",
-        # Method 3: Check if app is in foreground
-        f"{cmd}shell dumpsys window windows | grep {APP_PACKAGE}"
-    ]
+    # Verify app is running with multiple checks
+    verify_cmd = f"{cmd}shell dumpsys package {APP_PACKAGE} | grep 'state='"
+    try:
+        result = run_adb_command(verify_cmd, shell=True)
+        if result and APP_PACKAGE in result:
+            log_message(f"Successfully started {APP_PACKAGE}", "SUCCESS")
+            return True
+    except:
+        pass
     
-    app_running = False
-    for verify_cmd in verification_methods:
-        try:
-            result = run_adb_command(verify_cmd, shell=True)
-            if result and APP_PACKAGE in result:
-                app_running = True
-                break
-        except:
-            continue
+    # If first verification fails, try one more time with a longer delay
+    log_message("App may be starting, waiting additional time...", "INFO")
+    time.sleep(5)
+    try:
+        result = run_adb_command(verify_cmd, shell=True)
+        if result and APP_PACKAGE in result:
+            log_message(f"App started after additional delay", "SUCCESS")
+            return True
+    except:
+        pass
     
-    if app_running:
-        log_message(f"Successfully started {APP_PACKAGE}", "SUCCESS")
-        return True
-    else:
-        log_message("App may not have started properly", "WARNING")
-        # Try one more time with a longer delay
-        time.sleep(3)
-        try:
-            result = run_adb_command(f"{cmd}shell dumpsys package {APP_PACKAGE} | grep 'state='", shell=True)
-            if result and APP_PACKAGE in result:
-                log_message(f"App started after additional delay", "SUCCESS")
-                return True
-        except:
-            pass
-        return False
+    # Final check with a different method
+    try:
+        check_cmd = f"{cmd}shell ps | grep {APP_PACKAGE}"
+        result = run_adb_command(check_cmd, shell=True)
+        if result and APP_PACKAGE in result:
+            log_message(f"App is running (verified by process check)", "SUCCESS")
+            return True
+    except:
+        pass
+    
+    log_message("App may not have started properly", "WARNING")
+    return False
 
 def manage_bca_track(device=None):
     """Manage the BCA Track app installation with improved error handling."""
     clear_screen()
-    display_header()
+    display_header(device)
     
     if is_app_installed(device):
         log_message(f"{APP_PACKAGE} is already installed", "INFO")
@@ -750,12 +820,37 @@ def clear_screen():
     """Clear the terminal screen."""
     os.system('cls' if os.name == 'nt' else 'clear')
 
-def display_header():
-    """Display a header for the application."""
+def display_header(device=None):
+    """Display a header for the application with status bar."""
     clear_screen()
+    
+    # Main header
     print(f"\n{Fore.CYAN}{'=' * 60}{Style.RESET_ALL}")
     print(f"{Fore.CYAN}{'ADB Device Manager & App Handler':^60}{Style.RESET_ALL}")
-    print(f"{Fore.CYAN}{'=' * 60}{Style.RESET_ALL}\n")
+    print(f"{Fore.CYAN}{'=' * 60}{Style.RESET_ALL}")
+    
+    # Status bar
+    if device:
+        print(f"\n{Fore.CYAN}Status Bar:{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}{'-' * 60}{Style.RESET_ALL}")
+        
+        # Device status
+        print(f"{Fore.WHITE}Device:{Style.RESET_ALL} {Fore.GREEN}{device}{Style.RESET_ALL}")
+        
+        # App installation status
+        is_installed = is_app_installed(device)
+        install_status = f"{Fore.GREEN}Installed{Style.RESET_ALL}" if is_installed else f"{Fore.RED}Not Installed{Style.RESET_ALL}"
+        print(f"{Fore.WHITE}App Status:{Style.RESET_ALL} {install_status}")
+        
+        # App running status
+        if is_installed:
+            is_running = is_app_running(device)
+            run_status = f"{Fore.GREEN}Running{Style.RESET_ALL}" if is_running else f"{Fore.YELLOW}Not Running{Style.RESET_ALL}"
+            print(f"{Fore.WHITE}Running Status:{Style.RESET_ALL} {run_status}")
+        
+        print(f"{Fore.CYAN}{'-' * 60}{Style.RESET_ALL}\n")
+    else:
+        print(f"\n{Fore.YELLOW}No device selected{Style.RESET_ALL}\n")
 
 def display_device_selection(devices):
     """Display device selection menu."""
@@ -780,19 +875,19 @@ def display_device_selection(devices):
 
 def main_menu():
     """Display and handle the main menu."""
+    selected_device = None  # Track the selected device
+    
     while True:
-        display_header()
+        display_header(selected_device)  # Pass the selected device to header
         
         print(f"{Fore.CYAN}Main Menu:{Style.RESET_ALL}")
         print(f"1. {Fore.GREEN}Check ADB devices{Style.RESET_ALL}")
         print(f"2. {Fore.YELLOW}Manage BCA Track app{Style.RESET_ALL}")
         print(f"3. {Fore.BLUE}Pull SQL database from device{Style.RESET_ALL}")
         print(f"4. {Fore.BLUE}Push SQL database to device{Style.RESET_ALL}")
-        print(f"5. {Fore.CYAN}Test database access{Style.RESET_ALL}")
-        print(f"6. {Fore.MAGENTA}Test database replacement methods{Style.RESET_ALL}")
-        print(f"7. {Fore.RED}Exit{Style.RESET_ALL}")
+        print(f"5. {Fore.RED}Exit{Style.RESET_ALL}")
         
-        choice = input("\nSelect an option (1-7): ").strip()
+        choice = input("\nSelect an option (1-5): ").strip()
         
         if choice == "1":
             devices = check_adb_devices()
@@ -800,19 +895,25 @@ def main_menu():
                 print(f"\n{Fore.GREEN}Connected devices:{Style.RESET_ALL}")
                 for i, device in enumerate(devices, 1):
                     print(f"{i}. {device}")
+                # Update selected device if only one device is connected
+                if len(devices) == 1:
+                    selected_device = devices[0]
+                    log_message(f"Auto-selected device: {selected_device}", "INFO")
             input("\nPress Enter to continue...")
             
         elif choice == "2":
             devices = check_adb_devices()
             if devices:
-                selected_device = display_device_selection(devices)
+                if not selected_device or selected_device not in devices:
+                    selected_device = display_device_selection(devices)
                 manage_bca_track(selected_device)
             input("\nPress Enter to continue...")
             
         elif choice == "3":
             devices = check_adb_devices()
             if devices:
-                selected_device = display_device_selection(devices)
+                if not selected_device or selected_device not in devices:
+                    selected_device = display_device_selection(devices)
                 if test_database_access(selected_device):
                     handle_sql_db("pull", selected_device)
                 else:
@@ -822,7 +923,8 @@ def main_menu():
         elif choice == "4":
             devices = check_adb_devices()
             if devices:
-                selected_device = display_device_selection(devices)
+                if not selected_device or selected_device not in devices:
+                    selected_device = display_device_selection(devices)
                 if test_database_access(selected_device):
                     handle_sql_db("push", selected_device)
                 else:
@@ -830,20 +932,6 @@ def main_menu():
             input("\nPress Enter to continue...")
             
         elif choice == "5":
-            devices = check_adb_devices()
-            if devices:
-                selected_device = display_device_selection(devices)
-                test_database_access(selected_device)
-            input("\nPress Enter to continue...")
-            
-        elif choice == "6":
-            devices = check_adb_devices()
-            if devices:
-                selected_device = display_device_selection(devices)
-                test_database_replacement(selected_device)
-            input("\nPress Enter to continue...")
-            
-        elif choice == "7":
             log_message("Exiting program", "INFO")
             print(f"\n{Fore.GREEN}Thank you for using ADB Device Manager!{Style.RESET_ALL}")
             sys.exit(0)
