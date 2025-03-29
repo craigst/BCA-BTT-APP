@@ -17,7 +17,7 @@ db/
 # Configuration files
 *.ini
 *.conf
-
+*.png
 # VS Code settings
 .vscode/
 *.code-workspace
