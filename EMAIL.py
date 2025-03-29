@@ -167,7 +167,7 @@ def select_week():
         print_status("Invalid input.", "error")
         return None
 
-def send_email(week_end_date, pdf_files, week_summary):
+def send_email(week_end_date, files, week_summary):
     """Send email with PDF attachments and week summary."""
     try:
         config = load_email_config()
@@ -196,17 +196,40 @@ Files Attached:
 """
         # Get all files from the email folder
         email_dir = os.path.join(SCRIPT_DIR, "email", week_end_date.strftime("%d-%m-%Y"))
-        all_files = [f for f in os.listdir(email_dir) 
-                    if f.lower().endswith(('.pdf', '.jpg', '.jpeg', '.png', '.gif', '.img'))]
         
-        for file in all_files:
-            body += f"- {file}\n"
+        # Separate files by type
+        pdf_files = [f for f in files if f.endswith('.pdf')]
+        png_files = [f for f in files if f.endswith('.png')]
+        
+        # Count timesheet and loadsheets
+        timesheet_count = sum(1 for f in pdf_files if f.startswith('timesheet_'))
+        loadsheet_count = sum(1 for f in pdf_files if not f.startswith('timesheet_'))
+        
+        # Add PDF files to body
+        if pdf_files:
+            body += "\nPDF Documents:\n"
+            # Add timesheet first if present
+            timesheet = next((f for f in pdf_files if f.startswith('timesheet_')), None)
+            if timesheet:
+                body += f"- {timesheet}\n"
+            # Add loadsheets
+            for file in sorted(f for f in pdf_files if not f.startswith('timesheet_')):
+                body += f"- {file}\n"
+        
+        # Add PNG files to body
+        if png_files:
+            body += "\nReceipts & Additional Paperwork:\n"
+            for file in sorted(png_files):
+                body += f"- {file}\n"
         
         # Show clean email summary
         print(f"\n{Fore.CYAN}Email Summary:{Style.RESET_ALL}")
         print(f"{Fore.WHITE}To: {config['Email']['recipient_email']}")
         print(f"{Fore.WHITE}Subject: {msg['Subject']}")
-        print(f"{Fore.WHITE}Attachments: {len(all_files)} files")
+        if timesheet_count > 0:
+            print(f"{Fore.GREEN}✓ Timesheet Added{Style.RESET_ALL}")
+        print(f"{Fore.WHITE}Loadsheets Added: {loadsheet_count}")
+        print(f"{Fore.WHITE}Receipts & Paperwork: {len(png_files)} files")
         print(f"{Fore.WHITE}Total Loads: {week_summary['total_loads']}")
         print(f"{Fore.WHITE}Total Vehicles: {week_summary['total_vehicles']}")
         
@@ -219,16 +242,16 @@ Files Attached:
         msg.attach(MIMEText(body, 'plain'))
         
         # Attach files
-        for file in all_files:
+        for file in files:
             file_path = os.path.join(email_dir, file)
             with open(file_path, 'rb') as f:
                 # Determine file type
                 if file.lower().endswith('.pdf'):
                     attachment = MIMEApplication(f.read(), _subtype='pdf')
-                elif file.lower().endswith(('.jpg', '.jpeg')):
-                    attachment = MIMEApplication(f.read(), _subtype='jpeg')
                 elif file.lower().endswith('.png'):
                     attachment = MIMEApplication(f.read(), _subtype='png')
+                elif file.lower().endswith(('.jpg', '.jpeg')):
+                    attachment = MIMEApplication(f.read(), _subtype='jpeg')
                 elif file.lower().endswith('.gif'):
                     attachment = MIMEApplication(f.read(), _subtype='gif')
                 elif file.lower().endswith('.img'):
@@ -246,7 +269,6 @@ Files Attached:
                         config['Email']['sender_password'])
             server.send_message(msg)
         
-        print_status("Email sent successfully!", "success")
         return True
         
     except Exception as e:
@@ -432,18 +454,17 @@ def check_paperwork_files(selected_sunday):
             print_status("Failed to get week summary", "error")
             return False
         
-        # Get list of PDF files
-        pdf_files = [os.path.join(week_email_dir, f) for f in os.listdir(week_email_dir) 
-                    if f.endswith('.pdf')]
+        # Get list of PDF and PNG files
+        pdf_files = [f for f in os.listdir(week_email_dir) if f.endswith('.pdf')]
+        png_files = [f for f in os.listdir(week_email_dir) if f.endswith('.png')]
         
         # Send email
-        if send_email(week_end, pdf_files, week_summary):
+        if send_email(week_end, pdf_files + png_files, week_summary):
             print_status("Email sent successfully!", "success")
+            return True
         else:
             print_status("Failed to send email", "error")
             return False
-        
-        return True
         
     except Exception as e:
         print_status(f"Error: {str(e)}", "error")
