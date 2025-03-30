@@ -831,7 +831,7 @@ class SQLiteEditor:
             # Get all jobs grouped by load
             self.cursor.execute("""
                 SELECT dwjLoad, dwjType, COUNT(*) as count
-                FROM DWJJOB
+                FROM DWJJOB 
                 GROUP BY dwjLoad, dwjType
                 ORDER BY dwjLoad, dwjType
             """)
@@ -861,7 +861,7 @@ class SQLiteEditor:
                 print(f"{Fore.WHITE}{load_num:<15} | {Fore.YELLOW}{collections:<12} | {Fore.GREEN}{deliveries:<12} | {Fore.CYAN}{total:<12}{Style.RESET_ALL}")
             
             print(f"\n{Fore.CYAN}Total Loads: {len(load_groups)}{Style.RESET_ALL}")
-            
+                
         except sqlite3.Error as e:
             logging.error(f"Error showing loads: {e}")
         try:

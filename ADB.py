@@ -105,15 +105,20 @@ def run_adb_command(command, check_output=True, shell=False):
         log_message(f"Running ADB command: {cmd_str}", "INFO")
         
         if check_output:
-            result = subprocess.check_output(command, stderr=subprocess.STDOUT, 
-                                           universal_newlines=True, shell=shell)
-            return result.strip()
+            result = subprocess.run(command, capture_output=True, text=True, shell=shell)
+            if result.returncode != 0:
+                log_message(f"Command failed with error: {result.stderr}", "ERROR")
+                return ""
+            return result.stdout.strip()
         else:
-            subprocess.run(command, check=True, shell=shell)
+            result = subprocess.run(command, capture_output=True, text=True, shell=shell)
+            if result.returncode != 0:
+                log_message(f"Command failed with error: {result.stderr}", "ERROR")
+                return False
             return True
-    except subprocess.CalledProcessError as e:
-        log_message(f"ADB command failed: {cmd_str}", "ERROR")
-        log_message(f"Error details: {str(e)}", "ERROR")
+            
+    except Exception as e:
+        log_message(f"ADB command error: {str(e)}", "ERROR")
         if check_output:
             return ""
         return False
@@ -300,8 +305,7 @@ def grant_permissions(device=None):
     """Grant necessary permissions to the app."""
     permissions = [
         "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.MANAGE_EXTERNAL_STORAGE"  # Added for Android 11+
+        "android.permission.WRITE_EXTERNAL_STORAGE"
     ]
     
     cmd = "adb "
@@ -328,7 +332,7 @@ def grant_permissions(device=None):
         run_adb_command(settings_cmd, check_output=False, shell=True)
         time.sleep(2)  # Give time for settings to open
         
-        # Try to enable storage access
+        # Try to enable storage access through settings
         storage_cmd = f"{cmd}shell am start -a android.settings.MANAGE_APP_ALL_FILES_ACCESS_PERMISSION"
         run_adb_command(storage_cmd, check_output=False, shell=True)
         
@@ -345,10 +349,11 @@ def start_app(device=None):
     cmd = "adb "
     if device:
         cmd += f"-s {device} "
-    cmd += f"shell am start -n {APP_PACKAGE}/{APP_ACTIVITY}"
     
+    # Start the app
+    start_cmd = f"{cmd}shell am start -n {APP_PACKAGE}/{APP_ACTIVITY}"
     log_message(f"Starting {APP_PACKAGE}...", "INFO")
-    result = run_adb_command(cmd, check_output=True, shell=True)
+    result = run_adb_command(start_cmd, check_output=True, shell=True)
     
     if "Error" in result:
         log_message(f"Failed to start app: {result}", "ERROR")
@@ -359,35 +364,36 @@ def start_app(device=None):
     time.sleep(10)
     
     # Verify app is running with multiple checks
-    verify_cmd = f"{cmd}shell dumpsys package {APP_PACKAGE} | grep 'state='"
-    try:
-        result = run_adb_command(verify_cmd, shell=True)
-        if result and APP_PACKAGE in result:
-            log_message(f"Successfully started {APP_PACKAGE}", "SUCCESS")
-            return True
-    except:
-        pass
+    verify_methods = [
+        # Method 1: Check package state
+        f"{cmd}shell dumpsys package {APP_PACKAGE} | findstr state=",
+        # Method 2: Check process list
+        f"{cmd}shell ps | findstr {APP_PACKAGE}",
+        # Method 3: Check window focus
+        f"{cmd}shell dumpsys window | findstr mCurrentFocus"
+    ]
+    
+    for verify_cmd in verify_methods:
+        try:
+            result = run_adb_command(verify_cmd, shell=True)
+            if result and APP_PACKAGE in result:
+                log_message(f"Successfully started {APP_PACKAGE}", "SUCCESS")
+                return True
+        except:
+            continue
     
     # If first verification fails, try one more time with a longer delay
     log_message("App may be starting, waiting additional time...", "INFO")
     time.sleep(5)
-    try:
-        result = run_adb_command(verify_cmd, shell=True)
-        if result and APP_PACKAGE in result:
-            log_message(f"App started after additional delay", "SUCCESS")
-            return True
-    except:
-        pass
     
-    # Final check with a different method
-    try:
-        check_cmd = f"{cmd}shell ps | grep {APP_PACKAGE}"
-        result = run_adb_command(check_cmd, shell=True)
-        if result and APP_PACKAGE in result:
-            log_message(f"App is running (verified by process check)", "SUCCESS")
-            return True
-    except:
-        pass
+    for verify_cmd in verify_methods:
+        try:
+            result = run_adb_command(verify_cmd, shell=True)
+            if result and APP_PACKAGE in result:
+                log_message(f"App started after additional delay", "SUCCESS")
+                return True
+        except:
+            continue
     
     log_message("App may not have started properly", "WARNING")
     return False

@@ -1,0 +1,18 @@
+{
+    "name": "nagload2",
+    "description": "Auto-generated macro for nagload2.png",
+    "actions": [
+        {
+            "type": "key",
+            "key": "61"
+        },
+        {
+            "type": "key",
+            "key": "66"
+        }
+    ],
+    "trigger_image": "nagload2.png",
+    "is_active": true,
+    "users": null,
+    "confidence_threshold": 0.95
+}

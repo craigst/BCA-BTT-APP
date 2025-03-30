@@ -1,0 +1,39 @@
+{
+    "name": "nagload3",
+    "description": "Auto-generated macro for nagload3.png",
+    "actions": [
+        {
+            "type": "swipe",
+            "x1": 540,
+            "y1": 2700,
+            "x2": 540,
+            "y2": 800,
+            "duration": 500
+        },
+        {
+            "type": "wait",
+            "seconds": 0.5
+        },
+        {
+            "type": "swipe",
+            "x1": 540,
+            "y1": 2700,
+            "x2": 540,
+            "y2": 800,
+            "duration": 500
+        },
+        {
+            "type": "wait",
+            "seconds": 0.5
+        },
+        {
+            "type": "tap",
+            "x": 902,
+            "y": 2530
+        }
+    ],
+    "trigger_image": "nagload3.png",
+    "is_active": true,
+    "users": null,
+    "confidence_threshold": 0.95
+}

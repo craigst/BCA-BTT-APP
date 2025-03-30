@@ -626,42 +626,42 @@ class PaperworkManager:
                 ws = wb["Loadsheet"]
                 logging.info("Loaded workbook and worksheet")
                 
-                def safe_cell_write(cell_ref, value):
-                    """Safely write to a cell."""
-                    try:
+                    def safe_cell_write(cell_ref, value):
+                        """Safely write to a cell."""
+                        try:
                         # Convert value to string and capitalize if it's not None
                         cell_value = str(value).upper() if value is not None else ''
                         ws[cell_ref] = cell_value
                         logging.info(f"Successfully wrote value '{cell_value}' to cell {cell_ref}")
-                    except Exception as e:
+                        except Exception as e:
                         logging.error(f"Error writing to cell {cell_ref}: {e}")
-                
-                # Update header information
-                if collections:
+                    
+                    # Update header information
+                    if collections:
                     # Get the first collection date
-                    date_str = str(collections[0][3])
-                    try:
-                        if len(date_str) == 8:  # Ensure date string is in YYYYMMDD format
-                            date_obj = datetime.strptime(date_str, '%Y%m%d')
+                        date_str = str(collections[0][3])
+                        try:
+                            if len(date_str) == 8:  # Ensure date string is in YYYYMMDD format
+                                date_obj = datetime.strptime(date_str, '%Y%m%d')
                             formatted_date = date_obj.strftime('%d/%m/%Y')
                             # Update collection date in header
                             safe_cell_write('C6', formatted_date)  # Collection date in header
                             logging.info(f"Wrote collection date {formatted_date} to C6")
-                    except ValueError as e:
+                        except ValueError as e:
                         logging.warning(f"Error parsing collection date ({date_str}): {e}")
                         print(f"{Fore.YELLOW}Warning: Error parsing collection date ({date_str}): {e}{Style.RESET_ALL}")
-                
-                if deliveries:
+                    
+                    if deliveries:
                     # Get the first delivery date
-                    date_str = str(deliveries[0][3])
-                    try:
-                        if len(date_str) == 8:  # Ensure date string is in YYYYMMDD format
-                            date_obj = datetime.strptime(date_str, '%Y%m%d')
+                        date_str = str(deliveries[0][3])
+                        try:
+                            if len(date_str) == 8:  # Ensure date string is in YYYYMMDD format
+                                date_obj = datetime.strptime(date_str, '%Y%m%d')
                             formatted_date = date_obj.strftime('%d/%m/%Y')
                             # Update delivery date in signature section
                             safe_cell_write('H46', formatted_date)  # Delivery date in signature section
                             logging.info(f"Wrote delivery date {formatted_date} to H46")
-                    except ValueError as e:
+                        except ValueError as e:
                         logging.warning(f"Error parsing delivery date ({date_str}): {e}")
                         print(f"{Fore.YELLOW}Warning: Error parsing delivery date ({date_str}): {e}{Style.RESET_ALL}")
                 
@@ -677,40 +677,40 @@ class PaperworkManager:
                     except ValueError as e:
                         logging.warning(f"Error parsing collection date ({date_str}): {e}")
                         print(f"{Fore.YELLOW}Warning: Error parsing collection date ({date_str}): {e}{Style.RESET_ALL}")
-                
-                safe_cell_write('G6', str(load_number))  # Load Number
-                safe_cell_write('I6', str(load_number))  # Job ID (using load number)
+                    
+                    safe_cell_write('G6', str(load_number))  # Load Number
+                    safe_cell_write('I6', str(load_number))  # Job ID (using load number)
                 logging.info(f"Wrote load number {load_number} to G6 and I6")
-                
-                # Update collection and delivery locations
-                if collections:
-                    # Create a set of unique collection locations
-                    unique_collections = {}
-                    for collection in collections:
-                        location = f"{collection[2]} - {collection[5]}" if collection[2] and collection[5] else collection[2] or ''
-                        if location not in unique_collections:
-                            unique_collections[location] = 1
-                        else:
-                            unique_collections[location] += 1
                     
-                    # Join all locations with newlines
-                    collection_text = '\n'.join(unique_collections.keys())
-                    safe_cell_write('B9', collection_text)
+                    # Update collection and delivery locations
+                    if collections:
+                        # Create a set of unique collection locations
+                        unique_collections = {}
+                        for collection in collections:
+                            location = f"{collection[2]} - {collection[5]}" if collection[2] and collection[5] else collection[2] or ''
+                            if location not in unique_collections:
+                                unique_collections[location] = 1
+                            else:
+                                unique_collections[location] += 1
+                        
+                        # Join all locations with newlines
+                        collection_text = '\n'.join(unique_collections.keys())
+                        safe_cell_write('B9', collection_text)
                     logging.info(f"Wrote collection locations to B9: {collection_text}")
-                
-                if deliveries:
-                    # Create a set of unique delivery locations
-                    unique_deliveries = {}
-                    for delivery in deliveries:
-                        location = f"{delivery[2]} - {delivery[5]}" if delivery[2] and delivery[5] else delivery[2] or ''
-                        if location not in unique_deliveries:
-                            unique_deliveries[location] = 1
-                        else:
-                            unique_deliveries[location] += 1
                     
-                    # Join all locations with newlines
-                    delivery_text = '\n'.join(unique_deliveries.keys())
-                    safe_cell_write('F9', delivery_text)
+                    if deliveries:
+                        # Create a set of unique delivery locations
+                        unique_deliveries = {}
+                        for delivery in deliveries:
+                            location = f"{delivery[2]} - {delivery[5]}" if delivery[2] and delivery[5] else delivery[2] or ''
+                            if location not in unique_deliveries:
+                                unique_deliveries[location] = 1
+                            else:
+                                unique_deliveries[location] += 1
+                        
+                        # Join all locations with newlines
+                        delivery_text = '\n'.join(unique_deliveries.keys())
+                        safe_cell_write('F9', delivery_text)
                     logging.info(f"Wrote delivery locations to F9: {delivery_text}")
                 
                 # Format vehicle data for summary
@@ -726,32 +726,32 @@ class PaperworkManager:
                         str(vehicle[6] or '')   # notes
                     ))
                 logging.info(f"Formatted {len(formatted_vehicles)} vehicles")
-                
-                # Update vehicle information
-                for i, vehicle in enumerate(formatted_vehicles[:8]):  # Handle up to 8 vehicles
-                    base_row = 11 + (i * 4)  # Starting from row 11, increment by 4 for each car
+                    
+                    # Update vehicle information
+                    for i, vehicle in enumerate(formatted_vehicles[:8]):  # Handle up to 8 vehicles
+                        base_row = 11 + (i * 4)  # Starting from row 11, increment by 4 for each car
                     logging.info(f"Writing vehicle {i+1} to rows {base_row}-{base_row+2}")
                     
                     # Car details - swapped registration and make & model, and capitalize all data
                     safe_cell_write(f'B{base_row}', str(vehicle[1] or '').upper())  # Make & Model
                     safe_cell_write(f'B{base_row + 2}', str(vehicle[0] or '').upper())  # Registration
-                    safe_cell_write(f'E{base_row - 1}', 'N')  # Offloaded (default)
-                    safe_cell_write(f'G{base_row - 1}', 'Y')  # Documents (default)
+                        safe_cell_write(f'E{base_row - 1}', 'N')  # Offloaded (default)
+                        safe_cell_write(f'G{base_row - 1}', 'Y')  # Documents (default)
                     safe_cell_write(f'I{base_row - 1}', str(vehicle[4] or 'Y').upper())  # Spare Keys
-                    if vehicle[6]:  # Notes
+                        if vehicle[6]:  # Notes
                         safe_cell_write(f'C{base_row}', str(vehicle[6]).upper())
-                
-                # Generate and add load summary message
-                summary_message = self.generate_load_summary(formatted_vehicles)
+                    
+                    # Generate and add load summary message
+                    summary_message = self.generate_load_summary(formatted_vehicles)
                 safe_cell_write('C39', summary_message.upper())  # Capitalize summary message
                 logging.info(f"Wrote summary message to C39: {summary_message}")
-                
+                    
                 # Add signatures if enabled
-                if self.auto_signature:
-                    self.add_signatures(ws)
+                    if self.auto_signature:
+                        self.add_signatures(ws)
                     logging.info("Added signatures to worksheet")
-                
-                # Save the workbook
+                    
+                    # Save the workbook
                 wb.save(output_file)
                 logging.info(f"Saved workbook to {output_file}")
                 
@@ -846,14 +846,14 @@ class PaperworkManager:
                 # Get loads for the week with all required information
                 cursor.execute("""
                     WITH load_dates AS (
-                        SELECT 
+                    SELECT 
                             j.dwjload,
                             MAX(j.dwjdate) as load_date,
                             j.dwjcust as contractor,
                             STRING_AGG(DISTINCT CASE WHEN j.dwjtype = 'C' THEN j.dwjtown ELSE NULL END, ' | ') as collections,
                             STRING_AGG(DISTINCT CASE WHEN j.dwjtype = 'D' THEN j.dwjtown ELSE NULL END, ' | ') as deliveries,
                             COUNT(DISTINCT v.dwvvehref) as total_cars
-                        FROM public.dwjjob j
+                    FROM public.dwjjob j
                         LEFT JOIN public.dwvveh v ON j.dwjload = v.dwvload
                         WHERE j.dwjdate BETWEEN %s AND %s
                         GROUP BY j.dwjload, j.dwjcust
@@ -993,20 +993,20 @@ class PaperworkManager:
                     return False
             finally:
                 if 'cursor' in locals():
+                cursor.close()
+                if 'conn' in locals():
+                conn.close()
+                
+            except Exception as e:
+            logging.error(f"Error creating timesheet: {str(e)}")
+            print(f"{Fore.RED}Error creating timesheet: {str(e)}{Style.RESET_ALL}")
+                return False
+            finally:
+                if 'cursor' in locals():
                     cursor.close()
                 if 'conn' in locals():
                     conn.close()
             
-        except Exception as e:
-            logging.error(f"Error creating timesheet: {str(e)}")
-            print(f"{Fore.RED}Error creating timesheet: {str(e)}{Style.RESET_ALL}")
-            return False
-        finally:
-            if 'cursor' in locals():
-                cursor.close()
-            if 'conn' in locals():
-                conn.close()
-
     def create_all_paperwork(self, selected_sunday):
         """Create all loadsheets and timesheet for the selected week."""
         try:
@@ -1022,8 +1022,8 @@ class PaperworkManager:
             loads = self.get_loads_for_week(selected_sunday)
             if not loads:
                 print(f"{Fore.YELLOW}No loads found for this week.{Style.RESET_ALL}")
-                return False
-                
+            return False
+
             print(f"\n{Fore.CYAN}Found {len(loads)} loads for this week:{Style.RESET_ALL}")
             for load in loads:
                 print(f"{Fore.WHITE}Load: {Fore.YELLOW}{load[0]}{Style.RESET_ALL}")
@@ -1057,7 +1057,7 @@ class PaperworkManager:
             
             # Create loadsheets for each load
             print(f"\n{Fore.CYAN}Creating loadsheets...{Style.RESET_ALL}")
-            for i, load in enumerate(loads, 1):
+                        for i, load in enumerate(loads, 1):
                 print(f"\n{Fore.YELLOW}Processing load {i} of {len(loads)}: {load[0]}{Style.RESET_ALL}")
                 
                 try:
@@ -1105,7 +1105,7 @@ class PaperworkManager:
         for dir_desc, dir_path in signature_dirs.items():
             if not os.path.exists(dir_path):
                 missing_dirs.append(dir_desc)
-            else:
+                    else:
                 # Count PNG files in the directory
                 png_files = [f for f in os.listdir(dir_path) if f.lower().endswith('.png')]
                 if len(png_files) < 1:
@@ -1358,7 +1358,7 @@ class PaperworkManager:
             elif choice == "5":
                 print_status("Exiting program...", "info")
                 break
-            
+                
             else:
                 print_status("Invalid choice. Please try again.", "error")
             

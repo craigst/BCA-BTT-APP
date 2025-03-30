@@ -1,0 +1,15 @@
+{
+    "name": "bionag",
+    "description": "Auto-generated macro for bionag.png",
+    "actions": [
+        {
+            "type": "tap",
+            "x": 702,
+            "y": 2945
+        }
+    ],
+    "trigger_image": "bionag.png",
+    "is_active": true,
+    "users": null,
+    "confidence_threshold": 0.95
+}

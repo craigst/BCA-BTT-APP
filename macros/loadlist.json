@@ -1,0 +1,9 @@
+{
+    "name": "loadlist",
+    "description": "Auto-generated macro for loadlist.png",
+    "actions": [],
+    "trigger_image": "loadlist.png",
+    "is_active": true,
+    "users": null,
+    "confidence_threshold": 0.95
+}

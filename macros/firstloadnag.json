@@ -1,0 +1,24 @@
+{
+    "name": "firstloadnag",
+    "description": "Auto-generated macro for firstloadnag.png",
+    "actions": [
+        {
+            "type": "key",
+            "key": "61",
+            "description": "Press Tab"
+        },
+        {
+            "type": "wait",
+            "seconds": 1.0
+        },
+        {
+            "type": "tap",
+            "x": 702,
+            "y": 2684
+        }
+    ],
+    "trigger_image": "firstloadnag.png",
+    "is_active": true,
+    "users": null,
+    "confidence_threshold": 0.95
+}

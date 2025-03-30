@@ -1,0 +1,45 @@
+{
+    "name": "LoginMacro",
+    "description": "Macro to detect login screen and perform login",
+    "actions": [
+        {
+            "type": "key",
+            "key": "61",
+            "description": "Press Tab"
+        },
+        {
+            "type": "text",
+            "text": "Born4",
+            "description": "Enter username"
+        },
+        {
+            "type": "key",
+            "key": "61",
+            "description": "Press Tab"
+        },
+        {
+            "type": "text",
+            "text": "Transport4",
+            "description": "Enter password"
+        },
+        {
+            "type": "tap",
+            "x": 702,
+            "y": 1311,
+            "description": "Click login button"
+        },
+        {
+            "type": "wait",
+            "seconds": 30.0
+        }
+    ],
+    "trigger_image": "Login.png",
+    "is_active": true,
+    "users": [
+        {
+            "username": "Born4",
+            "password": "Transport4"
+        }
+    ],
+    "confidence_threshold": 0.95
+}

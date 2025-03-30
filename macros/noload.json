@@ -1,0 +1,15 @@
+{
+    "name": "noload",
+    "description": "Auto-generated macro for noload.png",
+    "actions": [
+        {
+            "type": "tap",
+            "x": 702,
+            "y": 1535
+        }
+    ],
+    "trigger_image": "noload.png",
+    "is_active": true,
+    "users": null,
+    "confidence_threshold": 0.95
+}
