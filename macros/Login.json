@@ -4,12 +4,7 @@
     "trigger_image": "Login.png",
     "is_active": true,
     "confidence_threshold": 0.95,
-    "users": [
-        {
-            "username": "Born4",
-            "password": "Transport4"
-        }
-    ],
+    "credentials_config": "config/credentials.json",
     "actions": [
         {
             "type": "key",
@@ -18,8 +13,8 @@
         },
         {
             "type": "text",
-            "text": "Born4",
-            "description": "Enter username"
+            "text": "${username}",
+            "description": "Enter username from config"
         },
         {
             "type": "key",
@@ -28,8 +23,8 @@
         },
         {
             "type": "text",
-            "text": "Transport4",
-            "description": "Enter password"
+            "text": "${password}",
+            "description": "Enter password from config"
         },
         {
             "type": "tap",

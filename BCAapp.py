@@ -584,6 +584,7 @@ class MacroManager:
     """Manages macro recording and playback."""
     
     def __init__(self, screen_capture: ScreenCapture):
+        self.macro_dir = MACROS_DIR
         self.macros = {}
         self.screen_capture = screen_capture
         self.match_threshold = 0.8
@@ -592,6 +593,69 @@ class MacroManager:
         self.show_matches = False
         self.save_failed_matches = False
         self.load_macros()
+    
+    def load_credentials(self, config_path):
+        """Load credentials from config file."""
+        try:
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+                if 'users' in config and len(config['users']) > 0:
+                    return config['users'][0]  # Return first user's credentials
+                return None
+        except Exception as e:
+            logger.error(f"Error loading credentials: {e}")
+            return None
+            
+    def substitute_credentials(self, action, credentials):
+        """Substitute credential placeholders in action text."""
+        if not credentials:
+            return action
+            
+        if action['type'] == 'text':
+            text = action['text']
+            if text == "${username}":
+                action['text'] = credentials['username']
+            elif text == "${password}":
+                action['text'] = credentials['password']
+        return action
+        
+    def load_macros(self):
+        """Load all macros from the macro directory."""
+        try:
+            for filename in os.listdir(self.macro_dir):
+                if filename.endswith('.json'):
+                    with open(os.path.join(self.macro_dir, filename), 'r') as f:
+                        macro = json.load(f)
+                        self.macros[macro['name']] = macro
+            logger.info(f"Loaded {len(self.macros)} macros")
+        except Exception as e:
+            logger.error(f"Error loading macros: {e}")
+            
+    def save_macro(self, macro):
+        """Save a macro to its JSON file."""
+        try:
+            filename = f"{macro['name']}.json"
+            with open(os.path.join(self.macro_dir, filename), 'w') as f:
+                json.dump(macro, f, indent=4)
+            logger.info(f"Saved macro: {macro['name']}")
+        except Exception as e:
+            logger.error(f"Error saving macro: {e}")
+            
+    def get_macro_actions(self, macro_name):
+        """Get actions for a macro with credential substitution."""
+        if macro_name not in self.macros:
+            return []
+            
+        macro = self.macros[macro_name]
+        actions = macro.get('actions', [])
+        
+        # Load and substitute credentials if config is specified
+        if 'credentials_config' in macro:
+            credentials = self.load_credentials(macro['credentials_config'])
+            if credentials:
+                actions = [self.substitute_credentials(action, credentials) for action in actions]
+                
+        return actions
     
     def reload_macros(self):
         """Reload all macros from disk."""
@@ -612,58 +676,6 @@ class MacroManager:
         except Exception as e:
             logger.error(f"Error reloading macros: {e}")
             raise
-    
-    def load_macros(self):
-        """Load all macros from the macros directory."""
-        try:
-            self.macros.clear()
-            macro_files = [f for f in os.listdir(MACROS_DIR) if f.endswith('.json')]
-            
-            logger.info(f"Found {len(macro_files)} macro files:")
-            for macro_file in macro_files:
-                try:
-                    with open(os.path.join(MACROS_DIR, macro_file), 'r') as f:
-                        data = json.load(f)
-                        macro = Macro(
-                            name=data['name'],
-                            description=data.get('description', ''),
-                            actions=data.get('actions', []),
-                            trigger_image=data.get('trigger_image'),
-                            is_active=data.get('is_active', True),
-                            users=data.get('users'),
-                            confidence_threshold=data.get('confidence_threshold', 0.8)
-                        )
-                        self.macros[macro.name] = macro
-                        
-                        # Log detailed macro information
-                        logger.info(f"Loaded macro: {macro.name}")
-                        logger.info(f"  - Trigger image: {macro.trigger_image}")
-                        logger.info(f"  - Active: {macro.is_active}")
-                        logger.info(f"  - Confidence threshold: {macro.confidence_threshold}")
-                        logger.info(f"  - Number of actions: {len(macro.actions)}")
-                        if macro.users:
-                            logger.info(f"  - Number of users: {len(macro.users)}")
-                        
-                except Exception as e:
-                    logger.error(f"Error loading macro {macro_file}: {str(e)}")
-            
-            logger.info(f"\nTotal macros loaded: {len(self.macros)}")
-            logger.info("=" * 50)
-            
-        except Exception as e:
-            logger.error(f"Error loading macros: {str(e)}")
-            raise
-    
-    def save_macro(self, macro: Macro):
-        """Save macro to file."""
-        try:
-            file = MACROS_DIR / f"{macro.name}.json"
-            with open(file, 'w') as f:
-                json.dump(macro.__dict__, f, indent=4)
-            self.macros[macro.name] = macro
-            logging.info(f"Macro saved: {macro.name}")
-        except Exception as e:
-            logging.error(f"Save macro error: {e}")
     
     def find_image_match(self, screenshot: np.ndarray, template_path: str) -> Tuple[bool, float, Tuple[int, int]]:
         """
@@ -772,7 +784,7 @@ class MacroManager:
                 logging.info(f"Trigger image found for macro: {macro_name}")
             
             # Execute actions
-            for action in macro.actions:
+            for action in self.get_macro_actions(macro_name):
                 self._execute_action(action, device)
             return True
             
