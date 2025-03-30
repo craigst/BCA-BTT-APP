@@ -34,7 +34,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                            QSpinBox, QCheckBox, QMessageBox, QTabWidget,
                            QLineEdit, QFileDialog, QTextEdit, QGroupBox,
                            QDoubleSpinBox, QListWidget, QDialog, QStatusBar,
-                           QFrame, QSplitter)
+                           QFrame, QSplitter, QInputDialog)
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread
 from PyQt6.QtGui import QImage, QPixmap
 from rich.console import Console
@@ -407,7 +407,7 @@ class ScreenCapture(QThread):
                     macro_active = False
                     if macro_exists:
                         macro = manager.macros[macro_name]
-                        macro_active = macro.is_active
+                        macro_active = macro.get('is_active', True)
                     
                     if max_val >= manager.match_threshold:
                         logger.info(f"Match found: {image_file} (Confidence: {max_val:.3f})")
@@ -501,6 +501,7 @@ class UserManager:
         self.users: List[User] = []
         self.config_file = CONFIG_DIR / "users.ini"
         self.key_file = CONFIG_DIR / "key.key"
+        self.credentials_file = CONFIG_DIR / "credentials.json"
         self._load_key()
         self._load_users()
     
@@ -519,22 +520,62 @@ class UserManager:
             raise
     
     def _load_users(self):
-        """Load users from config file."""
+        """Load users from config file and credentials.json."""
         try:
+            # First try to load from credentials.json
+            if self.credentials_file.exists():
+                with open(self.credentials_file, 'r') as f:
+                    credentials = json.load(f)
+                    
+                    if 'users' in credentials:
+                        logger.info(f"Loaded {len(credentials['users'])} users from credentials.json")
+                        # Track if we've found a default user
+                        found_default = False
+                        for user_data in credentials['users']:
+                            # If this user is marked as default and we already found one,
+                            # set this one to not default
+                            if user_data.get('is_default', False) and found_default:
+                                user_data['is_default'] = False
+                                logger.warning(f"Multiple default users found. Setting {user_data['username']} as non-default.")
+                            elif user_data.get('is_default', False):
+                                found_default = True
+                            
+                            user = User(
+                                username=user_data['username'],
+                                password=user_data['password'],
+                                is_default=user_data.get('is_default', False)
+                            )
+                            self.users.append(user)
+                        return
+                    else:
+                        logger.warning("No 'users' key found in credentials.json")
+            
+            # Fall back to users.ini if credentials.json doesn't exist or has no users
             if not self.config_file.exists():
+                logger.warning(f"Neither credentials.json nor {self.config_file} found")
                 return
             
             config = configparser.ConfigParser()
             config.read(self.config_file)
             
+            # Track if we've found a default user
+            found_default = False
             for username in config.sections():
-                password = self._decrypt_password(config[username]['password'])
                 is_default = config[username].getboolean('is_default', False)
+                # If this user is marked as default and we already found one,
+                # set this one to not default
+                if is_default and found_default:
+                    is_default = False
+                    logger.warning(f"Multiple default users found. Setting {username} as non-default.")
+                elif is_default:
+                    found_default = True
+                
+                password = self._decrypt_password(config[username]['password'])
                 self.users.append(User(username, password, is_default))
                 
         except Exception as e:
-            logging.error(f"User loading error: {e}")
-    
+            logger.error(f"User loading error: {e}")
+
     def _encrypt_password(self, password: str) -> str:
         """Encrypt password using Fernet."""
         f = Fernet(self.key)
@@ -551,24 +592,78 @@ class UserManager:
             if any(u.username == username for u in self.users):
                 raise ValueError("Username already exists")
             
-            encrypted = self._encrypt_password(password)
+            # If this user is default, remove default from other users
+            if is_default:
+                for user in self.users:
+                    user.is_default = False
+            
+            # Create new user with plain password
             user = User(username, password, is_default)
             self.users.append(user)
             
-            # Save to config
+            # Save to config with encrypted password
             config = configparser.ConfigParser()
             config.read(self.config_file)
             config[username] = {
-                'password': encrypted,
+                'password': self._encrypt_password(password),
                 'is_default': str(is_default)
             }
             with open(self.config_file, 'w') as f:
                 config.write(f)
             
+            # Update credentials.json with plain password
+            self._update_credentials_file()
+            
             logging.info(f"User added: {username}")
             
         except Exception as e:
             logging.error(f"Add user error: {e}")
+            raise
+    
+    def save_users(self):
+        """Save all users to config file."""
+        try:
+            config = configparser.ConfigParser()
+            
+            for user in self.users:
+                config[user.username] = {
+                    'password': self._encrypt_password(user.password),
+                    'is_default': str(user.is_default)
+                }
+            
+            with open(self.config_file, 'w') as f:
+                config.write(f)
+            
+            # Update credentials.json with plain passwords
+            self._update_credentials_file()
+            
+            logging.info("Users saved successfully")
+            
+        except Exception as e:
+            logging.error(f"Save users error: {e}")
+            raise
+    
+    def _update_credentials_file(self):
+        """Update the credentials.json file with current users."""
+        try:
+            credentials = {
+                'users': [
+                    {
+                        'username': user.username,
+                        'password': user.password,  # Store plain password
+                        'is_default': user.is_default
+                    }
+                    for user in self.users
+                ]
+            }
+            
+            with open(self.credentials_file, 'w') as f:
+                json.dump(credentials, f, indent=4)
+            
+            logging.info("Credentials file updated")
+            
+        except Exception as e:
+            logging.error(f"Update credentials error: {e}")
             raise
     
     def get_default_user(self) -> Optional[User]:
@@ -577,313 +672,450 @@ class UserManager:
     
     def authenticate(self, username: str, password: str) -> bool:
         """Authenticate user."""
-        user = next((u for u in self.users if u.username == username), None)
-        return user and user.password == password
+        try:
+            user = next((u for u in self.users if u.username == username), None)
+            if not user:
+                return False
+            return user.password == password
+        except Exception as e:
+            logger.error(f"Authentication error: {e}")
+            return False
+
+    def delete_user(self, username: str) -> bool:
+        """Delete a user by username."""
+        try:
+            user = next((u for u in self.users if u.username == username), None)
+            if not user:
+                logger.warning(f"User not found for deletion: {username}")
+                return False
+                
+            # Don't allow deleting the last user
+            if len(self.users) <= 1:
+                logger.warning("Cannot delete the last user")
+                return False
+                
+            # If deleting default user, set another user as default
+            if user.is_default and len(self.users) > 1:
+                next_user = next((u for u in self.users if u.username != username), None)
+                if next_user:
+                    next_user.is_default = True
+                    
+            # Remove user from list
+            self.users.remove(user)
+            
+            # Save changes
+            self.save_users()
+            logger.info(f"Deleted user: {username}")
+            return True
+                
+        except Exception as e:
+            logger.error(f"Error deleting user: {e}")
+            return False
+
+    def edit_user(self, username: str) -> bool:
+        """Edit a user by username."""
+        try:
+            user = next((u for u in self.users if u.username == username), None)
+            if not user:
+                logger.warning(f"User not found for editing: {username}")
+                return False
+                
+            dialog = UserDialog(None, user)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                new_username, new_password, is_default = dialog.get_user_data()
+                
+                # If username changed, check if new username exists
+                if new_username != user.username and any(u.username == new_username for u in self.users):
+                    logger.warning(f"Username already exists: {new_username}")
+                    return False
+                
+                # Update user
+                user.username = new_username
+                user.password = new_password
+                user.is_default = is_default
+                
+                # Handle default user change
+                if is_default and not user.is_default:
+                    # Remove default from other users
+                    for u in self.users:
+                        if u.username != new_username:
+                            u.is_default = False
+                    user.is_default = True
+                elif not is_default and user.is_default:
+                    # Find another user to set as default
+                    next_user = next((u for u in self.users if u.username != new_username), None)
+                    if next_user:
+                        next_user.is_default = True
+                
+                # Save changes
+                self.save_users()
+                logger.info(f"Updated user: {new_username}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Error editing user: {e}")
+            return False
+
+class ActionDialog(QDialog):
+    """Dialog for adding macro actions."""
+    
+    def __init__(self, action_type: str, parent=None):
+        super().__init__(parent)
+        self.action_type = action_type
+        self.setup_ui()
+        
+    def setup_ui(self):
+        """Setup the dialog UI."""
+        self.setWindowTitle(f"Add {self.action_type.title()} Action")
+        
+        layout = QVBoxLayout(self)
+        
+        if self.action_type == 'tap':
+            # Tap coordinates
+            coords_layout = QHBoxLayout()
+            coords_layout.addWidget(QLabel("X:"))
+            self.x_edit = QSpinBox()
+            self.x_edit.setRange(0, 9999)  # Allow 4-digit numbers
+            coords_layout.addWidget(self.x_edit)
+            
+            coords_layout.addWidget(QLabel("Y:"))
+            self.y_edit = QSpinBox()
+            self.y_edit.setRange(0, 9999)  # Allow 4-digit numbers
+            coords_layout.addWidget(self.y_edit)
+            
+            layout.addLayout(coords_layout)
+            
+        elif self.action_type == 'swipe':
+            # Swipe coordinates
+            start_layout = QHBoxLayout()
+            start_layout.addWidget(QLabel("Start X:"))
+            self.x1_edit = QSpinBox()
+            self.x1_edit.setRange(0, 9999)  # Allow 4-digit numbers
+            start_layout.addWidget(self.x1_edit)
+            
+            start_layout.addWidget(QLabel("Start Y:"))
+            self.y1_edit = QSpinBox()
+            self.y1_edit.setRange(0, 9999)  # Allow 4-digit numbers
+            start_layout.addWidget(self.y1_edit)
+            
+            layout.addLayout(start_layout)
+            
+            end_layout = QHBoxLayout()
+            end_layout.addWidget(QLabel("End X:"))
+            self.x2_edit = QSpinBox()
+            self.x2_edit.setRange(0, 9999)  # Allow 4-digit numbers
+            end_layout.addWidget(self.x2_edit)
+            
+            end_layout.addWidget(QLabel("End Y:"))
+            self.y2_edit = QSpinBox()
+            self.y2_edit.setRange(0, 9999)  # Allow 4-digit numbers
+            end_layout.addWidget(self.y2_edit)
+            
+            layout.addLayout(end_layout)
+            
+            # Add duration for swipe
+            duration_layout = QHBoxLayout()
+            duration_layout.addWidget(QLabel("Duration (ms):"))
+            self.duration_edit = QSpinBox()
+            self.duration_edit.setRange(100, 5000)  # 100ms to 5000ms
+            self.duration_edit.setValue(500)  # Default to 500ms
+            self.duration_edit.setSingleStep(100)
+            duration_layout.addWidget(self.duration_edit)
+            
+            layout.addLayout(duration_layout)
+            
+        elif self.action_type == 'key':
+            # Key input
+            key_layout = QHBoxLayout()
+            key_layout.addWidget(QLabel("Key:"))
+            self.key_edit = QLineEdit()
+            key_layout.addWidget(self.key_edit)
+            layout.addLayout(key_layout)
+            
+        elif self.action_type == 'wait':
+            # Wait duration
+            wait_layout = QHBoxLayout()
+            wait_layout.addWidget(QLabel("Seconds:"))
+            self.seconds_edit = QDoubleSpinBox()
+            self.seconds_edit.setRange(0.1, 60.0)
+            self.seconds_edit.setSingleStep(0.1)
+            wait_layout.addWidget(self.seconds_edit)
+            layout.addLayout(wait_layout)
+        
+        # Dialog buttons
+        button_box = QHBoxLayout()
+        
+        ok_btn = QPushButton("OK")
+        ok_btn.clicked.connect(self.accept)
+        button_box.addWidget(ok_btn)
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        button_box.addWidget(cancel_btn)
+        
+        layout.addLayout(button_box)
+    
+    def get_action(self) -> Dict:
+        """Get action data from dialog."""
+        if self.action_type == 'tap':
+            return {
+                'type': 'tap',
+                'x': self.x_edit.value(),
+                'y': self.y_edit.value()
+            }
+        elif self.action_type == 'swipe':
+            return {
+                'type': 'swipe',
+                'x1': self.x1_edit.value(),
+                'y1': self.y1_edit.value(),
+                'x2': self.x2_edit.value(),
+                'y2': self.y2_edit.value(),
+                'duration': self.duration_edit.value()
+            }
+        elif self.action_type == 'key':
+            return {
+                'type': 'key',
+                'key': self.key_edit.text()
+            }
+        elif self.action_type == 'wait':
+            return {
+                'type': 'wait',
+                'seconds': self.seconds_edit.value()
+            }
+        return {}
+
+class UserDialog(QDialog):
+    """Dialog for adding/editing users."""
+    
+    def __init__(self, parent=None, user=None):
+        super().__init__(parent)
+        self.user = user
+        self.setup_ui()
+        
+    def setup_ui(self):
+        """Setup the dialog UI."""
+        self.setWindowTitle("Add User" if not self.user else "Edit User")
+        
+        layout = QVBoxLayout(self)
+        
+        # Username
+        username_layout = QHBoxLayout()
+        username_layout.addWidget(QLabel("Username:"))
+        self.username_edit = QLineEdit()
+        if self.user:
+            self.username_edit.setText(self.user.username)
+        username_layout.addWidget(self.username_edit)
+        layout.addLayout(username_layout)
+        
+        # Password
+        password_layout = QHBoxLayout()
+        password_layout.addWidget(QLabel("Password:"))
+        self.password_edit = QLineEdit()
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        if self.user:
+            self.password_edit.setText(self.user.password)
+        password_layout.addWidget(self.password_edit)
+        layout.addLayout(password_layout)
+        
+        # Default user checkbox
+        self.default_checkbox = QCheckBox("Set as default user")
+        if self.user:
+            self.default_checkbox.setChecked(self.user.is_default)
+        layout.addWidget(self.default_checkbox)
+        
+        # Dialog buttons
+        button_box = QHBoxLayout()
+        
+        ok_btn = QPushButton("OK")
+        ok_btn.clicked.connect(self.accept)
+        button_box.addWidget(ok_btn)
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        button_box.addWidget(cancel_btn)
+        
+        layout.addLayout(button_box)
+    
+    def get_user_data(self) -> Tuple[str, str, bool]:
+        """Get user data from dialog."""
+        return (
+            self.username_edit.text(),
+            self.password_edit.text(),
+            self.default_checkbox.isChecked()
+        )
 
 class MacroManager:
-    """Manages macro recording and playback."""
+    """Manages macro operations and storage."""
     
-    def __init__(self, screen_capture: ScreenCapture):
-        self.macro_dir = MACROS_DIR
+    def __init__(self, screen_capture=None):
+        self.macros_dir = MACROS_DIR
         self.macros = {}
         self.screen_capture = screen_capture
-        self.match_threshold = 0.8
-        self.test_mode = False
-        self.test_results = []
-        self.show_matches = False
-        self.save_failed_matches = False
-        self.load_macros()
+        self.match_threshold = 0.8  # Default confidence threshold
+        self._load_macros()
     
-    def load_credentials(self, config_path):
-        """Load credentials from config file."""
+    def _load_macros(self):
+        """Load all macros from the macros directory."""
         try:
-            with open(config_path, 'r') as f:
-                config = json.load(f)
-                if 'users' in config and len(config['users']) > 0:
-                    return config['users'][0]  # Return first user's credentials
-                return None
-        except Exception as e:
-            logger.error(f"Error loading credentials: {e}")
-            return None
+            self.macros.clear()
+            for file_path in self.macros_dir.glob("*.json"):
+                try:
+                    with open(file_path, 'r') as f:
+                        macro_data = json.load(f)
+                        macro_name = file_path.stem
+                        self.macros[macro_name] = macro_data
+                except Exception as e:
+                    logger.error(f"Error loading macro {file_path}: {e}")
             
-    def substitute_credentials(self, action, credentials):
-        """Substitute credential placeholders in action text."""
-        if not credentials:
-            return action
-            
-        if action['type'] == 'text':
-            text = action['text']
-            if text == "${username}":
-                action['text'] = credentials['username']
-            elif text == "${password}":
-                action['text'] = credentials['password']
-        return action
-        
-    def load_macros(self):
-        """Load all macros from the macro directory."""
-        try:
-            for filename in os.listdir(self.macro_dir):
-                if filename.endswith('.json'):
-                    with open(os.path.join(self.macro_dir, filename), 'r') as f:
-                        macro = json.load(f)
-                        self.macros[macro['name']] = macro
             logger.info(f"Loaded {len(self.macros)} macros")
+            
         except Exception as e:
             logger.error(f"Error loading macros: {e}")
-            
-    def save_macro(self, macro):
-        """Save a macro to its JSON file."""
+    
+    def save_macro(self, macro: Dict):
+        """Save a macro to file."""
         try:
-            filename = f"{macro['name']}.json"
-            with open(os.path.join(self.macro_dir, filename), 'w') as f:
+            macro_name = macro['name']
+            file_path = self.macros_dir / f"{macro_name}.json"
+            
+            with open(file_path, 'w') as f:
                 json.dump(macro, f, indent=4)
-            logger.info(f"Saved macro: {macro['name']}")
+            
+            # Update in-memory macros
+            self.macros[macro_name] = macro
+            logger.info(f"Saved macro: {macro_name}")
+            
         except Exception as e:
             logger.error(f"Error saving macro: {e}")
-            
-    def get_macro_actions(self, macro_name):
-        """Get actions for a macro with credential substitution."""
-        if macro_name not in self.macros:
-            return []
-            
-        macro = self.macros[macro_name]
-        actions = macro.get('actions', [])
-        
-        # Load and substitute credentials if config is specified
-        if 'credentials_config' in macro:
-            credentials = self.load_credentials(macro['credentials_config'])
-            if credentials:
-                actions = [self.substitute_credentials(action, credentials) for action in actions]
-                
-        return actions
-    
-    def reload_macros(self):
-        """Reload all macros from disk."""
-        try:
-            logger.info("\n==================================================")
-            logger.info("RELOADING MACROS")
-            logger.info("==================================================")
-            
-            # Clear existing macros
-            self.macros.clear()
-            
-            # Reload macros
-            self.load_macros()
-            
-            logger.info("Macros reloaded successfully")
-            logger.info("==================================================\n")
-            
-        except Exception as e:
-            logger.error(f"Error reloading macros: {e}")
             raise
     
-    def find_image_match(self, screenshot: np.ndarray, template_path: str) -> Tuple[bool, float, Tuple[int, int]]:
-        """
-        Find template image in screenshot.
-        Returns: (found, confidence, position)
-        """
+    def delete_macro(self, macro_name: str):
+        """Delete a macro file."""
         try:
-            # Validate template path
-            template_path = Path(template_path)
-            if not template_path.exists():
-                logger.error(f"Template image not found: {template_path}")
-                return False, 0.0, (0, 0)
-            
-            # Read template with error checking
-            template = cv2.imread(str(template_path))
-            if template is None:
-                logger.error(f"Failed to load template image: {template_path}")
-                return False, 0.0, (0, 0)
-            
-            # Convert images to grayscale
-            gray_screenshot = cv2.cvtColor(screenshot, cv2.COLOR_BGR2GRAY)
-            gray_template = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
-            
-            # Perform template matching
-            result = cv2.matchTemplate(gray_screenshot, gray_template, cv2.TM_CCOEFF_NORMED)
-            min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(result)
-            
-            # Log match details
-            logger.debug(f"Match details for {template_path.name}:")
-            logger.debug(f"Confidence: {max_val:.3f}")
-            logger.debug(f"Position: {max_loc}")
-            
-            return max_val >= self.match_threshold, max_val, max_loc
+            file_path = self.macros_dir / f"{macro_name}.json"
+            if file_path.exists():
+                file_path.unlink()
+                if macro_name in self.macros:
+                    del self.macros[macro_name]
+                logger.info(f"Deleted macro: {macro_name}")
             
         except Exception as e:
-            logger.error(f"Image matching error: {e}")
-            return False, 0.0, (0, 0)
+            logger.error(f"Error deleting macro: {e}")
+            raise
     
-    def check_trigger_image(self, screenshot: np.ndarray, macro: Macro) -> bool:
-        """Check if trigger image is present in screenshot."""
-        if not macro.trigger_image:
-            return True
-            
-        trigger_path = IMAGES_DIR / macro.trigger_image
-        if not trigger_path.exists():
-            logging.error(f"Trigger image not found: {trigger_path}")
-            return False
-            
-        logging.info(f"Checking trigger image for macro: {macro.name}")
-        logging.info(f"Trigger image path: {trigger_path}")
-        
-        found, confidence, position = self.find_image_match(screenshot, str(trigger_path))
-        
-        if found:
-            logging.info(f"Trigger image found for macro: {macro.name}")
-            logging.info(f"Confidence: {confidence:.3f}")
-            logging.info(f"Position: {position}")
-        else:
-            logging.info(f"Trigger image not found for macro: {macro.name}")
-            logging.info(f"Best confidence: {confidence:.3f}")
-            logging.info(f"Best position: {position}")
-        
-        return found
-    
-    def test_image_matching(self, screenshot: np.ndarray):
-        """Test all trigger images against current screenshot."""
-        if not self.test_mode:
-            return
-            
-        self.test_results = []
-        logging.info("Starting image matching test")
-        
-        for macro_name, macro in self.macros.items():
-            if macro.is_active and macro.trigger_image:
-                logging.info(f"Testing macro: {macro_name}")
-                logging.info(f"Trigger image: {macro.trigger_image}")
-                self.check_trigger_image(screenshot, macro)
-        
-        # Log test results
-        logging.info("\nTest Results:")
-        for result in self.test_results:
-            logging.info(f"Template: {result['template']}")
-            logging.info(f"Confidence: {result['confidence']:.3f}")
-            logging.info(f"Position: {result['position']}")
-            logging.info(f"Threshold: {result['threshold']}")
-            logging.info(f"Timestamp: {result['timestamp']}")
-            logging.info("---")
-    
-    def execute_macro(self, macro_name: str, device: Optional[str] = None, screenshot: Optional[np.ndarray] = None):
-        """Execute macro actions if trigger image is found."""
-        if macro_name not in self.macros:
-            logging.error(f"Macro not found: {macro_name}")
-            return False
-        
-        macro = self.macros[macro_name]
-        if not macro.is_active:
-            logging.warning(f"Macro is inactive: {macro_name}")
-            return False
-        
+    def execute_macro(self, macro_name: str, device_id: str = None):
+        """Execute a macro's actions."""
         try:
-            # Check trigger image if specified
-            if macro.trigger_image and screenshot is not None:
-                if not self.check_trigger_image(screenshot, macro):
-                    logging.info(f"Trigger image not found for macro: {macro_name}")
-                    return False
-                logging.info(f"Trigger image found for macro: {macro_name}")
+            if macro_name not in self.macros:
+                raise ValueError(f"Macro not found: {macro_name}")
             
-            # Execute actions
-            for action in self.get_macro_actions(macro_name):
-                self._execute_action(action, device)
-            return True
+            macro = self.macros[macro_name]
+            actions = macro.get('actions', [])
+            
+            # Get the current selected user from MainWindow if available
+            current_user = None
+            try:
+                for window in QApplication.topLevelWidgets():
+                    if isinstance(window, MainWindow):
+                        selected_user_idx = window.user_combo.currentIndex()
+                        if selected_user_idx >= 0:
+                            selected_username = window.user_combo.currentText()
+                            logger.info(f"Using selected user: {selected_username}")
+                            for user in window.user_manager.users:
+                                if user.username == selected_username:
+                                    current_user = user
+                                    break
+                        break
+            except Exception as e:
+                logger.error(f"Error getting selected user: {e}")
+            
+            for action in actions:
+                action_type = action.get('type')
+                
+                if action_type == 'tap':
+                    x, y = action.get('x', 0), action.get('y', 0)
+                    self._run_adb_command(f"adb -s {device_id} shell input tap {x} {y}")
+                    
+                elif action_type == 'swipe':
+                    x1, y1 = action.get('x1', 0), action.get('y1', 0)
+                    x2, y2 = action.get('x2', 0), action.get('y2', 0)
+                    duration = action.get('duration', 500)
+                    self._run_adb_command(f"adb -s {device_id} shell input swipe {x1} {y1} {x2} {y2} {duration}")
+                    
+                elif action_type == 'key':
+                    key = action.get('key')
+                    if key:
+                        self._run_adb_command(f"adb -s {device_id} shell input keyevent {key}")
+                        
+                elif action_type == 'text':
+                    text = action.get('text')
+                    if text and current_user:
+                        # Replace variables with user data
+                        text = text.replace("${username}", current_user.username)
+                        text = text.replace("${password}", current_user.password)
+                        logger.info(f"Substituted text: {text}")
+                        
+                    if text:
+                        # Escape single quotes in text
+                        text = text.replace("'", "\\'")
+                        self._run_adb_command(f"adb -s {device_id} shell input text '{text}'")
+                        
+                elif action_type == 'wait':
+                    seconds = action.get('seconds', 1)
+                    time.sleep(seconds)
+            
+            logger.info(f"Executed macro: {macro_name}")
             
         except Exception as e:
-            logging.error(f"Macro execution error: {e}")
-            return False
+            logger.error(f"Error executing macro: {e}")
+            raise
     
-    def _execute_action(self, action: Dict, device: Optional[str] = None):
-        """Execute a single macro action."""
-        action_type = action.get('type')
-        if not action_type:
-            return
-        
+    def _run_adb_command(self, command: str):
+        """Run an ADB command."""
         try:
-            # Get ADB path from ScreenCapture
-            adb_path = self.screen_capture.adb_path
-            
-            # Build ADB command with device if specified
-            cmd = f'"{adb_path}"'
-            if device:
-                cmd += f" -s {device}"
-            
-            # Execute action based on type
-            if action_type == 'tap':
-                x, y = action['x'], action['y']
-                cmd_str = f"{cmd} shell input tap {x} {y}"
-                logging.info(f"\nExecuting ADB command: {cmd_str}")
-                result = subprocess.run(cmd_str, shell=True, capture_output=True, text=True)
-                if result.returncode == 0:
-                    logging.info("Command executed successfully")
-                else:
-                    logging.error(f"Command failed: {result.stderr}")
-                time.sleep(1)  # Wait for tap to complete
-                
-            elif action_type == 'swipe':
-                x1, y1, x2, y2 = action['x1'], action['y1'], action['x2'], action['y2']
-                duration = action.get('duration', 500)  # Default to 500ms if not specified
-                cmd_str = f"{cmd} shell input swipe {x1} {y1} {x2} {y2} {duration}"
-                logging.info(f"\nExecuting ADB command: {cmd_str}")
-                result = subprocess.run(cmd_str, shell=True, capture_output=True, text=True)
-                if result.returncode == 0:
-                    logging.info("Command executed successfully")
-                else:
-                    logging.error(f"Command failed: {result.stderr}")
-                time.sleep(1)  # Wait for swipe to complete
-                
-            elif action_type == 'key':
-                key = action['key']
-                cmd_str = f"{cmd} shell input keyevent {key}"
-                logging.info(f"\nExecuting ADB command: {cmd_str}")
-                result = subprocess.run(cmd_str, shell=True, capture_output=True, text=True)
-                if result.returncode == 0:
-                    logging.info("Command executed successfully")
-                else:
-                    logging.error(f"Command failed: {result.stderr}")
-                time.sleep(1)  # Wait for key press to complete
-                
-            elif action_type == 'text':
-                text = action['text']
-                # Escape special characters in text
-                text = text.replace("'", "\\'")
-                cmd_str = f"{cmd} shell input text '{text}'"
-                result = subprocess.run(cmd_str, shell=True, capture_output=True, text=True)
-                if result.returncode == 0:
-                    logging.info("Command executed successfully")
-                else:
-                    logging.error(f"Command failed: {result.stderr}")
-                time.sleep(1)  # Wait for text input to complete
-                
-            elif action_type == 'wait':
-                seconds = action['seconds']
-                logging.info(f"Waiting: {seconds} seconds")
-                time.sleep(seconds)
-                
+            if not self.screen_capture or not hasattr(self.screen_capture, '_run_adb_command'):
+                # Fall back to subprocess if screen_capture is not available
+                result = subprocess.run(command, shell=True, capture_output=True, text=True)
+                if result.returncode != 0:
+                    raise Exception(f"ADB command failed: {result.stderr}")
+                return result.stdout.strip()
+            else:
+                # Use screen_capture's ADB command runner
+                return self.screen_capture._run_adb_command(command)
         except Exception as e:
-            logging.error(f"Action execution error: {e}")
+            logger.error(f"ADB command error: {e}")
             raise
 
 class MainWindow(QMainWindow):
-    """Main GUI window."""
+    """Main window of the application."""
     
-    def __init__(self, screen_capture: ScreenCapture, user_manager: UserManager, macro_manager: MacroManager):
-        QMainWindow.__init__(self)
+    def __init__(self, screen_capture, user_manager, macro_manager):
+        super().__init__()
         self.screen_capture = screen_capture
         self.user_manager = user_manager
         self.macro_manager = macro_manager
-        
-        # Set macro_manager in screen_capture if not already set
-        if not hasattr(self.screen_capture, 'macro_manager') or self.screen_capture.macro_manager is None:
-            self.screen_capture.macro_manager = self.macro_manager
-            logger.info("Set macro manager in screen capture")
-        
+        self.current_macro = None
         self.setup_ui()
-        self.setup_timer()
         
-        # Connect new signals
+        # Connect signals
+        self.screen_capture.screenshot_ready.connect(self.update_preview)
         self.screen_capture.match_found.connect(self.handle_match_found)
-        self.screen_capture.no_match.connect(self.handle_no_match)
-    
+        self.screen_capture.error_occurred.connect(self.handle_error)
+        
+        # Start screen capture
+        self.screen_capture.start()
+        
+        # Load macros
+        self.update_macro_list()
+        
+        # Set default values
+        self.user_combo.setCurrentIndex(0)
+        self.timing_combo.setCurrentText(AppMode.FAST.name)
+        self.device_combo.setCurrentText(self.screen_capture.device_id)
+        self.confidence_threshold.setValue(0.8)
+        
+        logger.info("Initialized MainWindow and updated user list")
+
     def setup_ui(self):
         """Setup the main window UI."""
         self.setWindowTitle("BCA Macro Manager")
@@ -904,6 +1136,31 @@ class MainWindow(QMainWindow):
         self.device_combo.setMinimumWidth(200)
         device_layout.addWidget(self.device_combo)
         top_section.addLayout(device_layout)
+        
+        # Add spacing
+        top_section.addSpacing(20)
+        
+        # User selection with default indicator
+        user_layout = QHBoxLayout()
+        user_layout.addWidget(QLabel("User:"))
+        self.user_combo = QComboBox()
+        self.user_combo.setMinimumWidth(150)
+        user_layout.addWidget(self.user_combo)
+        
+        # Add user management buttons
+        add_user_btn = QPushButton("Add User")
+        add_user_btn.clicked.connect(self.add_user)
+        user_layout.addWidget(add_user_btn)
+        
+        edit_user_btn = QPushButton("Edit User")
+        edit_user_btn.clicked.connect(self.edit_user)
+        user_layout.addWidget(edit_user_btn)
+        
+        delete_user_btn = QPushButton("Delete User")
+        delete_user_btn.clicked.connect(self.delete_user)
+        user_layout.addWidget(delete_user_btn)
+        
+        top_section.addLayout(user_layout)
         
         # Add spacing
         top_section.addSpacing(20)
@@ -1098,7 +1355,7 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         
-        # Add countdown label to status bar
+        # Add countdown label to status bar (right side)
         self.countdown_label = QLabel()
         self.status_bar.addPermanentWidget(self.countdown_label)
         
@@ -1110,399 +1367,461 @@ class MainWindow(QMainWindow):
         # Initialize UI state
         self.update_device_list()
         self.update_macro_list()
-        
-    def setup_timer(self):
-        """Setup update timer."""
-        # Remove the timer setup since we're using the ScreenCapture thread timing
-        # Connect screen capture signals
-        self.screen_capture.screenshot_ready.connect(self.handle_screenshot)
-        self.screen_capture.error_occurred.connect(self.handle_error)
-        
-        # Start screen capture thread
-        self.screen_capture.start()
-    
-    def handle_screenshot(self, q_img):
-        """Handle new screenshot."""
-        if not self.capture_toggle.isChecked():
-            return
-            
+        self.update_user_list()  # Make sure user list is updated after UI setup
+
+    def add_user(self):
+        """Add a new user."""
         try:
-            if q_img is None:
-                logger.error("Received null screenshot")
+            dialog = UserDialog(self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                username, password, is_default = dialog.get_user_data()
+                
+                # Check if username already exists
+                if any(u.username == username for u in self.user_manager.users):
+                    QMessageBox.warning(self, "Warning", "Username already exists")
+                    return
+                
+                # Add user
+                self.user_manager.add_user(username, password, is_default)
+                self.update_user_list()
+                self.status_bar.showMessage(f"Added user: {username}")
+                logger.info(f"Added user: {username}")
+                
+        except Exception as e:
+            logger.error(f"Error adding user: {e}")
+            self.status_bar.showMessage(f"Error: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to add user: {e}")
+
+    def delete_user(self):
+        """Delete selected user."""
+        try:
+            current_data = self.user_combo.currentData()
+            if not current_data:
+                QMessageBox.warning(self, "Warning", "Please select a user to delete")
                 return
                 
-            # Scale to fit label while maintaining aspect ratio
-            pixmap = QPixmap.fromImage(q_img)
-            scaled_pixmap = pixmap.scaled(
+            user = next((u for u in self.user_manager.users if u.username == current_data), None)
+            if not user:
+                QMessageBox.warning(self, "Warning", "Selected user not found")
+                return
+                
+            # Don't allow deleting the last user
+            if len(self.user_manager.users) <= 1:
+                QMessageBox.warning(self, "Warning", "Cannot delete the last user")
+                return
+                
+            reply = QMessageBox.question(
+                self, 'Delete User',
+                f'Are you sure you want to delete user "{current_data}"?',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                success = self.user_manager.delete_user(current_data)
+                if success:
+                    self.update_user_list()
+                    self.status_bar.showMessage(f"Deleted user: {current_data}")
+                    logger.info(f"Deleted user: {current_data}")
+                else:
+                    QMessageBox.warning(self, "Error", f"Failed to delete user: {current_data}")
+                
+        except Exception as e:
+            logger.error(f"Error deleting user: {e}")
+            self.status_bar.showMessage(f"Error: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to delete user: {e}")
+
+    def edit_user(self):
+        """Edit selected user."""
+        try:
+            current_data = self.user_combo.currentData()
+            if not current_data:
+                QMessageBox.warning(self, "Warning", "Please select a user to edit")
+                return
+                
+            user = next((u for u in self.user_manager.users if u.username == current_data), None)
+            if not user:
+                QMessageBox.warning(self, "Warning", "Selected user not found")
+                return
+                
+            dialog = UserDialog(self, user)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                username, password, is_default = dialog.get_user_data()
+                
+                # If username changed, check if new username exists
+                if username != current_data and any(u.username == username for u in self.user_manager.users):
+                    QMessageBox.warning(self, "Warning", "Username already exists")
+                    return
+                
+                # Update user
+                user.username = username
+                user.password = password
+                
+                # Handle default user change
+                if is_default and not user.is_default:
+                    # Remove default from other users
+                    for u in self.user_manager.users:
+                        if u.username != username:
+                            u.is_default = False
+                    user.is_default = True
+                elif not is_default and user.is_default:
+                    # Find another user to set as default
+                    next_user = next((u for u in self.user_manager.users if u.username != username), None)
+                    if next_user:
+                        next_user.is_default = True
+                
+                # Save changes
+                self.user_manager.save_users()
+                self.update_user_list()
+                self.status_bar.showMessage(f"Updated user: {username}")
+                logger.info(f"Updated user: {username}")
+                
+        except Exception as e:
+            logger.error(f"Error editing user: {e}")
+            self.status_bar.showMessage(f"Error: {e}")
+
+    def update_preview(self, image: QImage):
+        """Update the preview label with the latest screenshot."""
+        try:
+            # Scale image to fit preview label while maintaining aspect ratio
+            scaled_pixmap = QPixmap.fromImage(image).scaled(
                 self.preview_label.size(),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation
             )
             self.preview_label.setPixmap(scaled_pixmap)
-            
-            # Update status bar
-            self.status_bar.showMessage(f"Last update: {datetime.now().strftime('%H:%M:%S')}")
-            
         except Exception as e:
-            logger.error(f"Error displaying screenshot: {e}")
-            self.handle_error(f"Error processing screenshot: {e}")
-    
-    def handle_error(self, error_msg):
-        """Handle screenshot error."""
-        logging.error(f"Screenshot error: {error_msg}")
-        # Show error in GUI
-        self.preview_label.setText(f"Error: {error_msg}")
-        self.preview_label.setStyleSheet("color: red;")
-        self.status_bar.showMessage(f"Error: {error_msg}")
-    
-    def handle_match_found(self, macro_name: str, confidence: float, position: tuple):
-        """Handle when a match is found for a macro's trigger image."""
+            logger.error(f"Error updating preview: {e}")
+
+    def handle_match_found(self, image_name: str, confidence: float, position: tuple):
+        """Handle when a match is found."""
         try:
-            # Get current time
-            current_time = time.strftime("%H:%M:%S")
+            # Update match display
+            match_text = f"Match found: {image_name}\nConfidence: {confidence:.3f}\nPosition: {position}"
+            self.match_display.setText(match_text)
             
-            # Strip the extension from macro_name for comparison
-            image_name = Path(macro_name).stem
-            
-            # Check if macro exists and is active
-            macro_exists = False
-            macro_active = False
-            matching_macro = None
-            
-            # Log all available macros for debugging
-            logger.info(f"Available macros: {list(self.macro_manager.macros.keys())}")
-            logger.info(f"Looking for macro with trigger image: {image_name}")
-            
-            # Find macro by matching trigger image
-            for macro in self.macro_manager.macros.values():
-                if macro.trigger_image:
-                    trigger_name = Path(macro.trigger_image).stem
-                    logger.info(f"Checking macro '{macro.name}' with trigger image '{trigger_name}'")
-                    if trigger_name == image_name:
-                        macro_exists = True
-                        macro_active = macro.is_active
-                        matching_macro = macro
-                        logger.info(f"Found matching macro: {macro.name}")
-                        break
-            
-            # Update UI with match information
-            self.match_display.setText(f"Image: {macro_name}\n"
-                                   f"Confidence: {confidence:.3f}\n"
-                                   f"Position: {position}\n"
-                                   f"Time: {current_time}\n"
-                                   f"Has Macro: {'Yes' if macro_exists else 'No'}\n"
-                                   f"Macro Active: {'Yes' if macro_active else 'No'}")
-            
-            # Log detailed information
-            if macro_exists:
-                logger.info(f"Found macro '{matching_macro.name}' with trigger image '{macro_name}'")
-                logger.info(f"Macro status: Active={macro_active}, Confidence={confidence:.3f}")
-                if macro_active:
-                    logger.info(f"Macro '{matching_macro.name}' is active and will be executed")
-                else:
-                    logger.info(f"Macro '{matching_macro.name}' is inactive and will not be executed")
+            # Check if auto-execute is enabled
+            if self.auto_execute.isChecked():
+                macro_name = Path(image_name).stem
+                if macro_name in self.macro_manager.macros:
+                    self.macro_manager.execute_macro(macro_name, self.screen_capture.device_id)
+                    
+        except Exception as e:
+            logger.error(f"Error handling match: {e}")
+
+    def handle_error(self, error_message: str):
+        """Handle errors from screen capture."""
+        try:
+            self.status_bar.showMessage(f"Error: {error_message}")
+            logger.error(f"Screen capture error: {error_message}")
+        except Exception as e:
+            logger.error(f"Error handling error: {e}")
+
+    def toggle_capture(self, state: int):
+        """Toggle screen capture on/off."""
+        try:
+            if state == Qt.CheckState.Checked.value:
+                self.screen_capture.running = True
+                self.status_bar.showMessage("Screen capture enabled")
+                logger.info("Screen capture enabled")
             else:
-                logger.info(f"No macro found for image '{macro_name}'")
-            
-            # Execute macro if it exists, is active, and auto-execute is enabled
-            if macro_exists and macro_active and self.auto_execute.isChecked():
-                logger.info(f"Auto-executing macro '{matching_macro.name}'")
-                self.macro_manager.execute_macro(matching_macro.name, self.screen_capture.device_id)
-            elif macro_exists and macro_active and not self.auto_execute.isChecked():
-                logger.info(f"Macro '{matching_macro.name}' found and active but auto-execute is disabled")
-            elif macro_exists and not macro_active:
-                logger.info(f"Macro '{matching_macro.name}' found but is inactive")
-            else:
-                logger.info(f"No valid macro configuration for '{macro_name}'")
-                
+                self.screen_capture.running = False
+                self.status_bar.showMessage("Screen capture disabled")
+                logger.info("Screen capture disabled")
         except Exception as e:
-            logger.error(f"Error handling match: {str(e)}")
-            self.handle_error(f"Error handling match: {str(e)}")
-    
-    def handle_no_match(self):
-        """Handle when no matches are found."""
-        try:
-            # Update status bar
-            self.status_bar.showMessage("No matches found")
-            
-        except Exception as e:
-            logging.error(f"Error handling no match: {e}")
-    
-    def update_screenshot(self):
-        """Update screenshot display."""
-        try:
-            if not self.capture_toggle.isChecked():
-                return
-            
-            # Get current screenshot
-            screenshot = self.screen_capture.capture_screenshot()
-            if screenshot:
-                # Scale to fit preview label while maintaining aspect ratio
-                pixmap = QPixmap.fromImage(screenshot)
-                scaled_pixmap = pixmap.scaled(
-                    self.preview_label.size(),
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                self.preview_label.setPixmap(scaled_pixmap)
-                
-                # Update status bar
-                self.status_bar.showMessage(f"Last update: {datetime.now().strftime('%H:%M:%S')}")
-                
-        except Exception as e:
-            logger.error(f"Error updating screenshot: {e}")
+            logger.error(f"Error toggling capture: {e}")
             self.status_bar.showMessage(f"Error: {e}")
-    
-    def save_screenshot(self):
-        """Save current screenshot."""
-        filename = f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-        if self.screen_capture.save_screenshot(filename):
-            QMessageBox.information(self, "Success", f"Screenshot saved as {filename}")
-        else:
-            QMessageBox.warning(self, "Error", "Failed to save screenshot")
-    
-    def update_macro_list(self):
-        """Update macro list in combo box."""
-        self.macro_list.clear()
-        for name in self.macro_manager.macros:
-            self.macro_list.addItem(name)
-    
-    def record_macro(self):
-        """Start macro recording."""
-        dialog = MacroEditor(self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            macro = dialog.get_macro()
-            self.macro_manager.save_macro(macro)
+
+    def reload_macros(self):
+        """Reload macros from disk."""
+        try:
+            self.macro_manager._load_macros()
             self.update_macro_list()
-            QMessageBox.information(self, "Success", "Macro saved successfully")
-    
+            self.status_bar.showMessage("Macros reloaded")
+            logger.info("Macros reloaded")
+        except Exception as e:
+            logger.error(f"Error reloading macros: {e}")
+            self.status_bar.showMessage(f"Error: {e}")
+
+    def update_macro_list(self):
+        """Update the macro list widget."""
+        try:
+            self.macro_list.clear()
+            for macro_name in self.macro_manager.macros:
+                self.macro_list.addItem(macro_name)
+            logger.info(f"Updated macro list with {len(self.macro_manager.macros)} macros")
+        except Exception as e:
+            logger.error(f"Error updating macro list: {e}")
+            self.status_bar.showMessage(f"Error: {e}")
+
+    def on_macro_selected(self, current, previous):
+        """Handle macro selection change."""
+        try:
+            if not current:
+                return
+                
+            macro_name = current.text()
+            if macro_name in self.macro_manager.macros:
+                self.current_macro = self.macro_manager.macros[macro_name]
+                
+                # Update settings
+                self.confidence_threshold.setValue(self.current_macro.get('confidence_threshold', 0.8))
+                self.active_checkbox.setChecked(self.current_macro.get('is_active', True))
+                
+                # Update actions list
+                self.actions_list.clear()
+                for action in self.current_macro.get('actions', []):
+                    self.actions_list.addItem(str(action))
+                    
+                self.status_bar.showMessage(f"Selected macro: {macro_name}")
+                logger.info(f"Selected macro: {macro_name}")
+                
+        except Exception as e:
+            logger.error(f"Error selecting macro: {e}")
+            self.status_bar.showMessage(f"Error: {e}")
+
     def play_macro(self):
         """Play the selected macro."""
         try:
-            if not self.macro_list.currentItem():
+            if not self.current_macro:
                 QMessageBox.warning(self, "Warning", "Please select a macro first")
                 return
                 
             macro_name = self.macro_list.currentItem().text()
-            if macro_name not in self.macro_manager.macros:
-                QMessageBox.warning(self, "Warning", "Selected macro not found")
-                return
-                
-            # Get current screenshot for image matching
-            screenshot = self.screen_capture.capture_screenshot()
-            if screenshot is None:
-                QMessageBox.warning(self, "Error", "Failed to capture screenshot")
-                return
+            self.macro_manager.execute_macro(macro_name, self.screen_capture.device_id)
+            self.status_bar.showMessage(f"Executed macro: {macro_name}")
+            logger.info(f"Executed macro: {macro_name}")
             
-            # Convert QImage to numpy array
-            width = screenshot.width()
-            height = screenshot.height()
-            ptr = screenshot.bits()
-            ptr.setsize(height * width * 3)
-            arr = np.frombuffer(ptr, np.uint8).reshape((height, width, 3))
-            
-            # Execute macro
-            if self.macro_manager.execute_macro(macro_name, self.screen_capture.device_id, arr):
-                self.status_bar.showMessage(f"Macro '{macro_name}' executed successfully")
-                logger.info(f"Executed macro: {macro_name}")
-            else:
-                self.status_bar.showMessage(f"Failed to execute macro '{macro_name}'")
-                logger.error(f"Failed to execute macro: {macro_name}")
-                
         except Exception as e:
             logger.error(f"Error playing macro: {e}")
-            self.status_bar.showMessage(f"Error playing macro: {e}")
-            QMessageBox.warning(self, "Error", f"Failed to play macro: {e}")
-    
-    def update_macro_details(self, macro_name):
-        """Update macro details display."""
-        if macro_name and macro_name in self.macro_manager.macros:
-            macro = self.macro_manager.macros[macro_name]
-            self.macro_description.setText(f"Description: {macro.description}")
-            self.macro_trigger.setText(f"Trigger Image: {macro.trigger_image or 'None'}")
-            self.macro_status.setText(f"Status: {'Active' if macro.is_active else 'Inactive'}")
-        else:
-            self.macro_description.setText("")
-            self.macro_trigger.setText("")
-            self.macro_status.setText("")
-            
-    def edit_macro(self):
-        """Edit selected macro."""
-        macro_name = self.macro_list.currentText()
-        if macro_name and macro_name in self.macro_manager.macros:
-            dialog = MacroEditor(self, self.macro_manager.macros[macro_name])
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                new_macro = dialog.get_macro()
-                self.macro_manager.macros[macro_name] = new_macro
-                self.update_macro_list()
-            
-    def delete_macro(self):
-        """Delete selected macro."""
-        macro_name = self.macro_list.currentText()
-        if macro_name and macro_name in self.macro_manager.macros:
-            reply = QMessageBox.question(
-                self, 'Delete Macro',
-                f'Are you sure you want to delete macro "{macro_name}"?',
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-            )
-            if reply == QMessageBox.StandardButton.Yes:
-                # TODO: Implement macro deletion
-                pass
-    
-    def toggle_test_mode(self, state):
-        """Toggle test mode and update macro manager."""
-        self.macro_manager.test_mode = state == Qt.CheckState.Checked.value
-        if self.macro_manager.test_mode:
-            self.test_results.setText("Test mode enabled. Results will be displayed here.")
-        else:
-            self.test_results.setText("Test mode disabled.")
-    
-    def update_test_results(self):
-        """Update test results display."""
-        if not self.macro_manager.test_mode:
-            return
-            
-        results_text = "Test Results:\n\n"
-        for result in self.macro_manager.test_results:
-            results_text += f"Template: {result['template']}\n"
-            results_text += f"Confidence: {result['confidence']:.3f}\n"
-            results_text += f"Position: {result['position']}\n"
-            results_text += f"Threshold: {result['threshold']}\n"
-            results_text += f"Timestamp: {result['timestamp']}\n"
-            results_text += f"Scale: {result['scale']:.2f}\n"
-            results_text += f"Method: {result['method']}\n"
-            results_text += f"Direct Match: {result['direct_match']:.3f}\n"
-            results_text += f"Edge Match: {result['edge_match']:.3f}\n"
-            results_text += f"Feature Match: {result['feature_match']:.3f}\n"
-            results_text += "---\n"
-        
-        self.test_results.setText(results_text)
-    
-    def reload_macros(self):
-        """Reload macros and update UI."""
-        try:
-            # Reload macros
-            self.macro_manager.reload_macros()
-            
-            # Update UI
-            self.update_macro_list()
-            
-            # Show success message
-            self.status_bar.showMessage("Macros reloaded successfully")
-            logger.info("Macros reloaded and UI updated")
-            
-        except Exception as e:
-            logger.error(f"Error reloading macros: {e}")
-            self.status_bar.showMessage(f"Error reloading macros: {e}")
-
-    def toggle_capture(self, state):
-        """Toggle screen capture on/off."""
-        try:
-            if state == Qt.CheckState.Checked.value:
-                # Start capture
-                self.screen_capture.running = True
-                self.screen_capture.start()
-                self.countdown_timer.start()  # Start countdown timer
-                self.status_bar.showMessage("Screen capture started")
-                logger.info("Screen capture started")
-            else:
-                # Stop capture
-                self.screen_capture.running = False
-                self.screen_capture.wait()
-                self.countdown_timer.stop()  # Stop countdown timer
-                self.status_bar.showMessage("Screen capture stopped")
-                logger.info("Screen capture stopped")
-                
-        except Exception as e:
-            logger.error(f"Error toggling capture: {e}")
             self.status_bar.showMessage(f"Error: {e}")
-            # Reset checkbox state on error
-            self.capture_toggle.setChecked(not state)
 
     def add_macro(self):
         """Add a new macro."""
         try:
-            # Create and show macro editor dialog
-            dialog = MacroEditor(self)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                # Get macro data from dialog
-                macro = dialog.get_macro()
+            name, ok = QInputDialog.getText(self, "Add Macro", "Enter macro name:")
+            if ok and name:
+                if name in self.macro_manager.macros:
+                    QMessageBox.warning(self, "Warning", "Macro name already exists")
+                    return
+                    
+                # Create new macro
+                macro = {
+                    'name': name,
+                    'description': '',
+                    'actions': [],
+                    'is_active': True,
+                    'confidence_threshold': 0.8
+                }
                 
-                # Save macro
                 self.macro_manager.save_macro(macro)
-                
-                # Update UI
                 self.update_macro_list()
-                
-                # Show success message
-                self.status_bar.showMessage(f"Macro '{macro.name}' created successfully")
-                logger.info(f"Created new macro: {macro.name}")
+                self.status_bar.showMessage(f"Added macro: {name}")
+                logger.info(f"Added macro: {name}")
                 
         except Exception as e:
             logger.error(f"Error adding macro: {e}")
-            self.status_bar.showMessage(f"Error adding macro: {e}")
-            QMessageBox.warning(self, "Error", f"Failed to add macro: {e}")
+            self.status_bar.showMessage(f"Error: {e}")
 
-    def on_macro_selected(self, current, previous):
-        """Handle macro selection in the list."""
+    def add_key_action(self):
+        """Add a key action to the current macro."""
         try:
-            if current and current.text() in self.macro_manager.macros:
-                macro = self.macro_manager.macros[current.text()]
+            if not self.current_macro:
+                QMessageBox.warning(self, "Warning", "Please select a macro first")
+                return
                 
-                # Update settings
-                self.confidence_threshold.setValue(macro.confidence_threshold)
-                self.active_checkbox.setChecked(macro.is_active)
-                
-                # Update actions list
-                self.actions_list.clear()
-                for action in macro.actions:
-                    self.actions_list.addItem(self.format_action(action))
-                
-                # Update status bar
-                self.status_bar.showMessage(f"Selected macro: {macro.name}")
-                logger.info(f"Selected macro: {macro.name}")
+            dialog = ActionDialog('key', self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                action = dialog.get_action()
+                self.current_macro['actions'].append(action)
+                self.macro_manager.save_macro(self.current_macro)
+                self.actions_list.addItem(str(action))
+                self.status_bar.showMessage("Added key action")
+                logger.info("Added key action")
                 
         except Exception as e:
-            logger.error(f"Error handling macro selection: {e}")
+            logger.error(f"Error adding key action: {e}")
             self.status_bar.showMessage(f"Error: {e}")
-    
-    def format_action(self, action: Dict) -> str:
-        """Format action for display in list."""
-        action_type = action.get('type', '')
-        if action_type == 'tap':
-            return f"Tap at ({action['x']}, {action['y']})"
-        elif action_type == 'swipe':
-            return f"Swipe from ({action['x1']}, {action['y1']}) to ({action['x2']}, {action['y2']})"
-        elif action_type == 'key':
-            return f"Key press: {action['key']}"
-        elif action_type == 'text':
-            return f"Text input: {action['text']}"
-        elif action_type == 'wait':
-            return f"Wait {action['seconds']} seconds"
-        return str(action)
-    
-    def add_action(self, action_type: str):
-        """Add new action to list."""
-        dialog = ActionDialog(action_type, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            action = dialog.get_action()
-            self.actions_list.addItem(self.format_action(action))
-    
-    def get_macro(self) -> Macro:
-        """Get macro data from dialog."""
-        actions = []
-        for i in range(self.actions_list.count()):
-            item = self.actions_list.item(i)
-            # TODO: Parse action from item text
-            actions.append({})  # Placeholder
-        
-        return Macro(
-            name=self.name_edit.text(),
-            description=self.desc_edit.text(),
-            trigger_image=self.trigger_combo.currentText() if self.trigger_combo.currentText() != "None" else None,
-            actions=actions,
-            is_active=True
-        )
+
+    def add_text_action(self):
+        """Add a text action to the current macro."""
+        try:
+            if not self.current_macro:
+                QMessageBox.warning(self, "Warning", "Please select a macro first")
+                return
+                
+            text, ok = QInputDialog.getText(self, "Add Text Action", "Enter text:")
+            if ok and text:
+                action = {'type': 'text', 'text': text}
+                self.current_macro['actions'].append(action)
+                self.macro_manager.save_macro(self.current_macro)
+                self.actions_list.addItem(str(action))
+                self.status_bar.showMessage("Added text action")
+                logger.info("Added text action")
+                
+        except Exception as e:
+            logger.error(f"Error adding text action: {e}")
+            self.status_bar.showMessage(f"Error: {e}")
+
+    def add_tap_action(self):
+        """Add a tap action to the current macro."""
+        try:
+            if not self.current_macro:
+                QMessageBox.warning(self, "Warning", "Please select a macro first")
+                return
+                
+            dialog = ActionDialog('tap', self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                action = dialog.get_action()
+                self.current_macro['actions'].append(action)
+                self.macro_manager.save_macro(self.current_macro)
+                self.actions_list.addItem(str(action))
+                self.status_bar.showMessage("Added tap action")
+                logger.info("Added tap action")
+                
+        except Exception as e:
+            logger.error(f"Error adding tap action: {e}")
+            self.status_bar.showMessage(f"Error: {e}")
+
+    def add_swipe_action(self):
+        """Add a swipe action to the current macro."""
+        try:
+            if not self.current_macro:
+                QMessageBox.warning(self, "Warning", "Please select a macro first")
+                return
+                
+            dialog = ActionDialog('swipe', self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                action = dialog.get_action()
+                self.current_macro['actions'].append(action)
+                self.macro_manager.save_macro(self.current_macro)
+                self.actions_list.addItem(str(action))
+                self.status_bar.showMessage("Added swipe action")
+                logger.info("Added swipe action")
+                
+        except Exception as e:
+            logger.error(f"Error adding swipe action: {e}")
+            self.status_bar.showMessage(f"Error: {e}")
+
+    def add_wait_action(self):
+        """Add a wait action to the current macro."""
+        try:
+            if not self.current_macro:
+                QMessageBox.warning(self, "Warning", "Please select a macro first")
+                return
+                
+            dialog = ActionDialog('wait', self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                action = dialog.get_action()
+                self.current_macro['actions'].append(action)
+                self.macro_manager.save_macro(self.current_macro)
+                self.actions_list.addItem(str(action))
+                self.status_bar.showMessage("Added wait action")
+                logger.info("Added wait action")
+                
+        except Exception as e:
+            logger.error(f"Error adding wait action: {e}")
+            self.status_bar.showMessage(f"Error: {e}")
+
+    def edit_action(self):
+        """Edit the selected action."""
+        try:
+            if not self.current_macro or not self.actions_list.currentItem():
+                QMessageBox.warning(self, "Warning", "Please select an action to edit")
+                return
+                
+            current_row = self.actions_list.currentRow()
+            action = self.current_macro['actions'][current_row]
+            
+            dialog = ActionDialog(action['type'], self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                new_action = dialog.get_action()
+                self.current_macro['actions'][current_row] = new_action
+                self.macro_manager.save_macro(self.current_macro)
+                self.actions_list.takeItem(current_row)
+                self.actions_list.insertItem(current_row, str(new_action))
+                self.status_bar.showMessage("Edited action")
+                logger.info("Edited action")
+                
+        except Exception as e:
+            logger.error(f"Error editing action: {e}")
+            self.status_bar.showMessage(f"Error: {e}")
+
+    def remove_action(self):
+        """Remove the selected action."""
+        try:
+            if not self.current_macro or not self.actions_list.currentItem():
+                QMessageBox.warning(self, "Warning", "Please select an action to remove")
+                return
+                
+            current_row = self.actions_list.currentRow()
+            self.current_macro['actions'].pop(current_row)
+            self.macro_manager.save_macro(self.current_macro)
+            self.actions_list.takeItem(current_row)
+            self.status_bar.showMessage("Removed action")
+            logger.info("Removed action")
+            
+        except Exception as e:
+            logger.error(f"Error removing action: {e}")
+            self.status_bar.showMessage(f"Error: {e}")
+
+    def update_countdown(self):
+        """Update the countdown display."""
+        try:
+            if not self.capture_toggle.isChecked():
+                self.countdown_label.setText("Capture stopped")
+                return
+                
+            if not self.screen_capture.current_screenshot_time:
+                self.countdown_label.setText("Waiting for first capture...")
+                return
+                
+            current_time = time.time()
+            time_until_next = self.screen_capture.check_interval - (current_time - self.screen_capture.current_screenshot_time)
+            
+            if time_until_next <= 0:
+                self.countdown_label.setText("Taking screenshot...")
+            else:
+                minutes = int(time_until_next // 60)
+                seconds = int(time_until_next % 60)
+                self.countdown_label.setText(f"Next capture in: {minutes:02d}:{seconds:02d}")
+                
+        except Exception as e:
+            logger.error(f"Error updating countdown: {e}")
+            self.countdown_label.setText("Error updating countdown")
+
+    def update_user_list(self):
+        """Update the user list in the combo box."""
+        try:
+            # Clear current list
+            self.user_combo.clear()
+            
+            # Add users to combo box with default indicator
+            for user in self.user_manager.users:
+                display_text = f"{user.username} {'(Default)' if user.is_default else ''}"
+                self.user_combo.addItem(display_text, user.username)
+            
+            # Select default user if exists
+            default_user = self.user_manager.get_default_user()
+            if default_user:
+                index = self.user_combo.findData(default_user.username)
+                if index >= 0:
+                    self.user_combo.setCurrentIndex(index)
+                    logger.info(f"Default user selected: {default_user.username}")
+                    
+        except Exception as e:
+            logger.error(f"Error updating user list: {e}")
+            self.status_bar.showMessage(f"Error: {e}")
+
+    def update_timing_mode(self, mode_name):
+        """Update the timing mode for screen capture."""
+        try:
+            mode = AppMode[mode_name]
+            self.screen_capture.set_timing_mode(mode)
+            self.status_bar.showMessage(f"Timing mode set to {mode_name} ({mode.value} seconds)")
+            logger.info(f"Timing mode updated to {mode_name}")
+        except Exception as e:
+            logger.error(f"Error updating timing mode: {e}")
+            self.status_bar.showMessage(f"Error updating timing mode: {e}")
 
     def update_device_list(self):
         """Update the device list in the combo box."""
@@ -1522,17 +1841,6 @@ class MainWindow(QMainWindow):
             logger.error(f"Error updating device list: {e}")
             self.status_bar.showMessage(f"Error: {e}")
 
-    def update_timing_mode(self, mode_name):
-        """Update the timing mode for screen capture."""
-        try:
-            mode = AppMode[mode_name]
-            self.screen_capture.set_timing_mode(mode)
-            self.status_bar.showMessage(f"Timing mode set to {mode_name} ({mode.value} seconds)")
-            logger.info(f"Timing mode updated to {mode_name}")
-        except Exception as e:
-            logger.error(f"Error updating timing mode: {e}")
-            self.status_bar.showMessage(f"Error updating timing mode: {e}")
-
     def reorder_actions(self, parent, start, end, destination, row):
         """Handle reordering of actions in the list."""
         try:
@@ -1543,8 +1851,10 @@ class MainWindow(QMainWindow):
             macro = self.macro_manager.macros[macro_name]
             
             # Move action in the actions list
-            action = macro.actions.pop(start)
-            macro.actions.insert(row, action)
+            actions = macro.get('actions', [])
+            action = actions.pop(start)
+            actions.insert(row, action)
+            macro['actions'] = actions
             
             # Save changes
             self.macro_manager.save_macro(macro)
@@ -1554,328 +1864,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Error reordering actions: {e}")
             self.status_bar.showMessage(f"Error: {e}")
-
-    def update_countdown(self):
-        """Update the countdown display."""
-        if not self.capture_toggle.isChecked():
-            self.countdown_label.setText("Capture stopped")
-            return
-            
-        if not self.screen_capture.current_screenshot_time:
-            self.countdown_label.setText("Waiting for first capture...")
-            return
-            
-        current_time = time.time()
-        time_until_next = self.screen_capture.check_interval - (current_time - self.screen_capture.current_screenshot_time)
-        
-        if time_until_next <= 0:
-            self.countdown_label.setText("Taking screenshot...")
-        else:
-            minutes = int(time_until_next // 60)
-            seconds = int(time_until_next % 60)
-            self.countdown_label.setText(f"Next capture in: {minutes:02d}:{seconds:02d}")
-
-    def add_key_action(self):
-        """Add a key press action to the current macro."""
-        try:
-            if not self.macro_list.currentItem():
-                QMessageBox.warning(self, "Warning", "Please select a macro first")
-                return
-                
-            dialog = ActionDialog("key", self)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                action = dialog.get_action()
-                macro_name = self.macro_list.currentItem().text()
-                macro = self.macro_manager.macros[macro_name]
-                macro.actions.append(action)
-                self.actions_list.addItem(self.format_action(action))
-                self.macro_manager.save_macro(macro)
-                self.status_bar.showMessage(f"Added key action to {macro_name}")
-                logger.info(f"Added key action to macro: {macro_name}")
-                
-        except Exception as e:
-            logger.error(f"Error adding key action: {e}")
-            self.status_bar.showMessage(f"Error: {e}")
-
-    def add_text_action(self):
-        """Add a text input action to the current macro."""
-        try:
-            if not self.macro_list.currentItem():
-                QMessageBox.warning(self, "Warning", "Please select a macro first")
-                return
-                
-            dialog = ActionDialog("text", self)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                action = dialog.get_action()
-                macro_name = self.macro_list.currentItem().text()
-                macro = self.macro_manager.macros[macro_name]
-                macro.actions.append(action)
-                self.actions_list.addItem(self.format_action(action))
-                self.macro_manager.save_macro(macro)
-                self.status_bar.showMessage(f"Added text action to {macro_name}")
-                logger.info(f"Added text action to macro: {macro_name}")
-                
-        except Exception as e:
-            logger.error(f"Error adding text action: {e}")
-            self.status_bar.showMessage(f"Error: {e}")
-
-    def add_tap_action(self):
-        """Add a tap action to the current macro."""
-        try:
-            if not self.macro_list.currentItem():
-                QMessageBox.warning(self, "Warning", "Please select a macro first")
-                return
-                
-            dialog = ActionDialog("tap", self)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                action = dialog.get_action()
-                macro_name = self.macro_list.currentItem().text()
-                macro = self.macro_manager.macros[macro_name]
-                macro.actions.append(action)
-                self.actions_list.addItem(self.format_action(action))
-                self.macro_manager.save_macro(macro)
-                self.status_bar.showMessage(f"Added tap action to {macro_name}")
-                logger.info(f"Added tap action to macro: {macro_name}")
-                
-        except Exception as e:
-            logger.error(f"Error adding tap action: {e}")
-            self.status_bar.showMessage(f"Error: {e}")
-
-    def add_swipe_action(self):
-        """Add a swipe action to the current macro."""
-        try:
-            if not self.macro_list.currentItem():
-                QMessageBox.warning(self, "Warning", "Please select a macro first")
-                return
-                
-            dialog = ActionDialog("swipe", self)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                action = dialog.get_action()
-                macro_name = self.macro_list.currentItem().text()
-                macro = self.macro_manager.macros[macro_name]
-                macro.actions.append(action)
-                self.actions_list.addItem(self.format_action(action))
-                self.macro_manager.save_macro(macro)
-                self.status_bar.showMessage(f"Added swipe action to {macro_name}")
-                logger.info(f"Added swipe action to macro: {macro_name}")
-                
-        except Exception as e:
-            logger.error(f"Error adding swipe action: {e}")
-            self.status_bar.showMessage(f"Error: {e}")
-
-    def add_wait_action(self):
-        """Add a wait action to the current macro."""
-        try:
-            if not self.macro_list.currentItem():
-                QMessageBox.warning(self, "Warning", "Please select a macro first")
-                return
-                
-            dialog = ActionDialog("wait", self)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                action = dialog.get_action()
-                macro_name = self.macro_list.currentItem().text()
-                macro = self.macro_manager.macros[macro_name]
-                macro.actions.append(action)
-                self.actions_list.addItem(self.format_action(action))
-                self.macro_manager.save_macro(macro)
-                self.status_bar.showMessage(f"Added wait action to {macro_name}")
-                logger.info(f"Added wait action to macro: {macro_name}")
-                
-        except Exception as e:
-            logger.error(f"Error adding wait action: {e}")
-            self.status_bar.showMessage(f"Error: {e}")
-
-    def edit_action(self):
-        """Edit the selected action in the current macro."""
-        try:
-            if not self.macro_list.currentItem() or not self.actions_list.currentItem():
-                QMessageBox.warning(self, "Warning", "Please select a macro and action")
-                return
-                
-            current_row = self.actions_list.currentRow()
-            macro_name = self.macro_list.currentItem().text()
-            macro = self.macro_manager.macros[macro_name]
-            action = macro.actions[current_row]
-            
-            # Create dialog with current action values
-            dialog = ActionDialog(action['type'], self)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                # Update action with new values
-                new_action = dialog.get_action()
-                macro.actions[current_row] = new_action
-                
-                # Update list item
-                self.actions_list.takeItem(current_row)
-                self.actions_list.insertItem(current_row, self.format_action(new_action))
-                
-                # Save changes
-                self.macro_manager.save_macro(macro)
-                self.status_bar.showMessage(f"Updated action in {macro_name}")
-                logger.info(f"Updated action in macro: {macro_name}")
-                
-        except Exception as e:
-            logger.error(f"Error editing action: {e}")
-            self.status_bar.showMessage(f"Error: {e}")
-
-    def remove_action(self):
-        """Remove selected action(s) from the current macro."""
-        try:
-            if not self.macro_list.currentItem():
-                QMessageBox.warning(self, "Warning", "Please select a macro first")
-                return
-                
-            # Get selected items
-            selected_items = self.actions_list.selectedItems()
-            if not selected_items:
-                QMessageBox.warning(self, "Warning", "Please select one or more actions to remove")
-                return
-                
-            # Get current macro
-            macro_name = self.macro_list.currentItem().text()
-            macro = self.macro_manager.macros[macro_name]
-            
-            # Remove selected actions in reverse order to maintain correct indices
-            for item in reversed(selected_items):
-                row = self.actions_list.row(item)
-                macro.actions.pop(row)
-                self.actions_list.takeItem(row)
-            
-            # Save changes
-            self.macro_manager.save_macro(macro)
-            self.status_bar.showMessage(f"Removed {len(selected_items)} action(s) from {macro_name}")
-            logger.info(f"Removed {len(selected_items)} action(s) from macro: {macro_name}")
-            
-        except Exception as e:
-            logger.error(f"Error removing action(s): {e}")
-            self.status_bar.showMessage(f"Error: {e}")
-
-class ActionDialog(QDialog):
-    """Dialog for adding macro actions."""
-    
-    def __init__(self, action_type: str, parent=None):
-        super().__init__(parent)
-        self.action_type = action_type
-        self.setup_ui()
-        
-    def setup_ui(self):
-        """Setup the dialog UI."""
-        self.setWindowTitle(f"Add {self.action_type.title()} Action")
-        
-        layout = QVBoxLayout(self)
-        
-        if self.action_type == 'tap':
-            # Tap coordinates
-            coords_layout = QHBoxLayout()
-            coords_layout.addWidget(QLabel("X:"))
-            self.x_edit = QSpinBox()
-            self.x_edit.setRange(0, 9999)  # Allow 4-digit numbers
-            coords_layout.addWidget(self.x_edit)
-            
-            coords_layout.addWidget(QLabel("Y:"))
-            self.y_edit = QSpinBox()
-            self.y_edit.setRange(0, 9999)  # Allow 4-digit numbers
-            coords_layout.addWidget(self.y_edit)
-            
-            layout.addLayout(coords_layout)
-            
-        elif self.action_type == 'swipe':
-            # Swipe coordinates
-            start_layout = QHBoxLayout()
-            start_layout.addWidget(QLabel("Start X:"))
-            self.x1_edit = QSpinBox()
-            self.x1_edit.setRange(0, 9999)  # Allow 4-digit numbers
-            start_layout.addWidget(self.x1_edit)
-            
-            start_layout.addWidget(QLabel("Start Y:"))
-            self.y1_edit = QSpinBox()
-            self.y1_edit.setRange(0, 9999)  # Allow 4-digit numbers
-            start_layout.addWidget(self.y1_edit)
-            
-            layout.addLayout(start_layout)
-            
-            end_layout = QHBoxLayout()
-            end_layout.addWidget(QLabel("End X:"))
-            self.x2_edit = QSpinBox()
-            self.x2_edit.setRange(0, 9999)  # Allow 4-digit numbers
-            end_layout.addWidget(self.x2_edit)
-            
-            end_layout.addWidget(QLabel("End Y:"))
-            self.y2_edit = QSpinBox()
-            self.y2_edit.setRange(0, 9999)  # Allow 4-digit numbers
-            end_layout.addWidget(self.y2_edit)
-            
-            layout.addLayout(end_layout)
-            
-            # Add duration for swipe
-            duration_layout = QHBoxLayout()
-            duration_layout.addWidget(QLabel("Duration (ms):"))
-            self.duration_edit = QSpinBox()
-            self.duration_edit.setRange(100, 5000)  # 100ms to 5000ms
-            self.duration_edit.setValue(500)  # Default to 500ms
-            self.duration_edit.setSingleStep(100)
-            duration_layout.addWidget(self.duration_edit)
-            
-            layout.addLayout(duration_layout)
-            
-        elif self.action_type == 'key':
-            # Key input
-            key_layout = QHBoxLayout()
-            key_layout.addWidget(QLabel("Key:"))
-            self.key_edit = QLineEdit()
-            key_layout.addWidget(self.key_edit)
-            layout.addLayout(key_layout)
-            
-        elif self.action_type == 'wait':
-            # Wait duration
-            wait_layout = QHBoxLayout()
-            wait_layout.addWidget(QLabel("Seconds:"))
-            self.seconds_edit = QDoubleSpinBox()
-            self.seconds_edit.setRange(0.1, 60.0)
-            self.seconds_edit.setSingleStep(0.1)
-            wait_layout.addWidget(self.seconds_edit)
-            layout.addLayout(wait_layout)
-        
-        # Dialog buttons
-        button_box = QHBoxLayout()
-        
-        ok_btn = QPushButton("OK")
-        ok_btn.clicked.connect(self.accept)
-        button_box.addWidget(ok_btn)
-        
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.clicked.connect(self.reject)
-        button_box.addWidget(cancel_btn)
-        
-        layout.addLayout(button_box)
-    
-    def get_action(self) -> Dict:
-        """Get action data from dialog."""
-        if self.action_type == 'tap':
-            return {
-                'type': 'tap',
-                'x': self.x_edit.value(),
-                'y': self.y_edit.value()
-            }
-        elif self.action_type == 'swipe':
-            return {
-                'type': 'swipe',
-                'x1': self.x1_edit.value(),
-                'y1': self.y1_edit.value(),
-                'x2': self.x2_edit.value(),
-                'y2': self.y2_edit.value(),
-                'duration': self.duration_edit.value()
-            }
-        elif self.action_type == 'key':
-            return {
-                'type': 'key',
-                'key': self.key_edit.text()
-            }
-        elif self.action_type == 'wait':
-            return {
-                'type': 'wait',
-                'seconds': self.seconds_edit.value()
-            }
-        return {}
 
 class BCAApp:
     """Main application class."""
@@ -1918,6 +1906,8 @@ class BCAApp:
                 self.screen_capture = ScreenCapture(device_id=device_id)
                 # Initialize MacroManager with ScreenCapture instance
                 self.macro_manager = MacroManager(screen_capture=self.screen_capture)
+                # Set macro_manager in screen_capture to establish bidirectional reference
+                self.screen_capture.set_macro_manager(self.macro_manager)
                 return True
             else:
                 logging.error("No device selected")

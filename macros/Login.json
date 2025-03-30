@@ -1,6 +1,6 @@
 {
     "name": "LoginMacro",
-    "description": "Macro to detect login screen and perform login",
+    "description": "Macro to detect login screen and perform login using selected user credentials",
     "trigger_image": "Login.png",
     "is_active": true,
     "confidence_threshold": 0.95,
@@ -9,22 +9,22 @@
         {
             "type": "key",
             "key": "61",
-            "description": "Press Tab"
+            "description": "Press Tab to focus username field"
         },
         {
             "type": "text",
             "text": "${username}",
-            "description": "Enter username from config"
+            "description": "Enter username from selected user"
         },
         {
             "type": "key",
             "key": "61",
-            "description": "Press Tab"
+            "description": "Press Tab to focus password field"
         },
         {
             "type": "text",
             "text": "${password}",
-            "description": "Enter password from config"
+            "description": "Enter password from selected user"
         },
         {
             "type": "tap",

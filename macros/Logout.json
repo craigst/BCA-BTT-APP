@@ -1,0 +1,21 @@
+{
+    "name": "LogoutMacro",
+    "description": "Macro to perform logout when loadlist.png is detected",
+    "trigger_image": "loadlist.png",
+    "is_active": false,
+    "confidence_threshold": 0.8,
+    "actions": [
+        {
+            "type": "tap",
+            "x": 702,
+            "y": 1311,
+            "description": "Click first logout button"
+        },
+        {
+            "type": "tap",
+            "x": 702,
+            "y": 1311,
+            "description": "Click second logout button"
+        }
+    ]
+} 
