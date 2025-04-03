@@ -828,14 +828,17 @@ class SQLiteEditor:
     def show_loads(self):
         """Show all loads with their collections and deliveries."""
         try:
-            # Get all jobs grouped by load
+            logging.info("Starting to show loads")
+            
+            # Get all jobs grouped by load with location names
             self.cursor.execute("""
-                SELECT dwjLoad, dwjType, COUNT(*) as count
+                SELECT dwjLoad, dwjType, COUNT(*) as count, GROUP_CONCAT(dwjName) as locations
                 FROM DWJJOB 
                 GROUP BY dwjLoad, dwjType
                 ORDER BY dwjLoad, dwjType
             """)
             load_stats = self.cursor.fetchall()
+            logging.info(f"Found {len(load_stats)} load statistics")
             
             if not load_stats:
                 print(f"{Fore.YELLOW}No loads found in database.{Style.RESET_ALL}")
@@ -843,10 +846,16 @@ class SQLiteEditor:
             
             # Group by load number
             load_groups = {}
-            for load_num, job_type, count in load_stats:
+            for load_num, job_type, count, locations in load_stats:
                 if load_num not in load_groups:
-                    load_groups[load_num] = {'C': 0, 'D': 0}
+                    load_groups[load_num] = {'C': 0, 'D': 0, 'C_locations': [], 'D_locations': []}
                 load_groups[load_num][job_type] = count
+                if job_type == 'C':
+                    load_groups[load_num]['C_locations'] = locations.split(',')
+                else:
+                    load_groups[load_num]['D_locations'] = locations.split(',')
+            
+            logging.info(f"Grouped into {len(load_groups)} unique loads")
             
             # Print header
             print(f"\n{Fore.CYAN}Load Summary:{Style.RESET_ALL}")
@@ -858,103 +867,72 @@ class SQLiteEditor:
                 collections = load_groups[load_num]['C']
                 deliveries = load_groups[load_num]['D']
                 total = collections + deliveries
+                
+                # Get vehicles for this load
+                self.cursor.execute("""
+                    SELECT dwvVehRef, dwvModDes
+                    FROM DWVVEH
+                    WHERE dwvLoad = ?
+                    ORDER BY dwvVehRef
+                """, (load_num,))
+                vehicles = self.cursor.fetchall()
+                logging.info(f"Load {load_num}: Found {len(vehicles)} vehicles")
+                
+                # Format vehicle information
+                vehicle_info = []
+                for reg, make_model in vehicles:
+                    reg = str(reg).strip() if reg else "Unknown"
+                    make_model = str(make_model).strip() if make_model else "Unknown"
+                    if reg and reg != "Unknown":
+                        vehicle_info.append(f"{reg} ({make_model})")
+                
+                # Print load summary
                 print(f"{Fore.WHITE}{load_num:<15} | {Fore.YELLOW}{collections:<12} | {Fore.GREEN}{deliveries:<12} | {Fore.CYAN}{total:<12}{Style.RESET_ALL}")
+                
+                # Print collection locations
+                if load_groups[load_num]['C_locations']:
+                    print(f"{Fore.YELLOW}Collections:{Style.RESET_ALL}")
+                    for loc in load_groups[load_num]['C_locations']:
+                        print(f"  {loc.strip()}")
+                
+                # Print delivery locations
+                if load_groups[load_num]['D_locations']:
+                    print(f"{Fore.GREEN}Deliveries:{Style.RESET_ALL}")
+                    for loc in load_groups[load_num]['D_locations']:
+                        print(f"  {loc.strip()}")
+                
+                # Print vehicles in a 3-column table
+                if vehicle_info:
+                    print(f"{Fore.WHITE}Cars:{Style.RESET_ALL}")
+                    # Calculate column width (terminal width / 3, with some padding)
+                    col_width = 40
+                    
+                    # Print table separator
+                    print("-" * (col_width * 3 + 6))
+                    
+                    # Print vehicles in rows of 3
+                    for i in range(0, len(vehicle_info), 3):
+                        row = vehicle_info[i:i+3]
+                        # Pad the row to always have 3 columns
+                        while len(row) < 3:
+                            row.append("")
+                        print(f"{Fore.WHITE}{row[0]:<{col_width}} | {row[1]:<{col_width}} | {row[2]:<{col_width}}{Style.RESET_ALL}")
+                else:
+                    print(f"{Fore.WHITE}No vehicles{Style.RESET_ALL}")
+                
+                print()  # Add blank line between loads
             
             print(f"\n{Fore.CYAN}Total Loads: {len(load_groups)}{Style.RESET_ALL}")
+            logging.info(f"Completed showing {len(load_groups)} loads")
                 
         except sqlite3.Error as e:
-            logging.error(f"Error showing loads: {e}")
-        try:
-            # Connect to PostgreSQL
-            pg_conn = psycopg2.connect(**self.pg_config)
-            pg_cursor = pg_conn.cursor()
-            
-            # Query for vehicles with missing or incomplete make/model info
-            query = """
-                SELECT dwvVehRef, dwvModDes 
-                FROM DWVVEH 
-                WHERE dwvModDes IS NULL 
-                OR TRIM(dwvModDes) = '' 
-                OR dwvModDes NOT LIKE '% %'
-                ORDER BY dwvVehRef;
-            """
-            pg_cursor.execute(query)
-            missing = pg_cursor.fetchall()
-            
-            if not missing:
-                print(f"{Fore.GREEN}No vehicles with missing make/model found.{Style.RESET_ALL}")
-                return
-            
-            print(f"\n{Fore.YELLOW}Found {len(missing)} vehicles with missing make/model:{Style.RESET_ALL}")
-            for reg, current_model in missing:
-                print(f"{Fore.WHITE}Registration: {Fore.GREEN}{reg}{Style.RESET_ALL}, Current Make/Model: {Fore.YELLOW}'{current_model or 'Empty'}'{Style.RESET_ALL}")
-            
-            choice = input(f"\n{Fore.CYAN}Would you like to find missing makes and models? (y/n):{Style.RESET_ALL} ").strip().lower()
-            if choice != 'y':
-                return
-            
-            # Load API key from config
-            config = configparser.ConfigParser()
-            config_path = os.path.join(SQL_DIR, "sql.ini")
-            config.read(config_path)
-            api_key = config.get("API", "CAR_API_KEY", fallback=None)
-            
-            if not api_key:
-                print(f"{Fore.RED}CAR_API_KEY not found in sql.ini{Style.RESET_ALL}")
-                return
-            
-            print(f"\n{Fore.CYAN}Fetching missing details...{Style.RESET_ALL}")
-            updated_count = 0
-            
-            for reg, current_model in missing:
-                try:
-                    # Make API request
-                    url = "https://api.checkcardetails.co.uk/vehicledata/vehicleregistration"
-                    params = {
-                        "apikey": api_key,
-                        "vrm": reg
-                    }
-                    
-                    response = requests.get(url, params=params, timeout=10)
-                    response.raise_for_status()
-                    data = response.json()
-                    
-                    if data and "make" in data and "model" in data:
-                        make = data.get("make", "").strip()
-                        model = data.get("model", "").strip()
-                        full_details = f"{make} {model}".strip()
-                        
-                        if full_details and " " in full_details:
-                            print(f"{Fore.GREEN}Found: {reg} -> {full_details}{Style.RESET_ALL}")
-                            
-                            # Update PostgreSQL
-                            update_sql = "UPDATE DWVVEH SET dwvModDes = %s WHERE dwvVehRef = %s"
-                            pg_cursor.execute(update_sql, (full_details, reg))
-                            pg_conn.commit()
-                            updated_count += 1
-                        else:
-                            print(f"{Fore.YELLOW}Invalid make/model data for {reg}{Style.RESET_ALL}")
-                    else:
-                        print(f"{Fore.YELLOW}No data found for {reg}{Style.RESET_ALL}")
-                    
-                    # Add delay to avoid rate limiting
-                    time.sleep(1)
-                    
-                except Exception as e:
-                    print(f"{Fore.RED}Error processing {reg}: {e}{Style.RESET_ALL}")
-                    continue
-            
-            print(f"\n{Fore.GREEN}Update complete:{Style.RESET_ALL}")
-            print(f"{Fore.WHITE}Updated {updated_count} out of {len(missing)} vehicles{Style.RESET_ALL}")
-            
+            error_msg = f"Error showing loads: {str(e)}"
+            logging.error(error_msg)
+            print(f"{Fore.RED}{error_msg}{Style.RESET_ALL}")
         except Exception as e:
-            logging.error(f"Error finding missing car details: {e}")
-            print(f"{Fore.RED}Error finding missing car details: {e}{Style.RESET_ALL}")
-        finally:
-            if 'pg_cursor' in locals():
-                pg_cursor.close()
-            if 'pg_conn' in locals():
-                pg_conn.close()
+            error_msg = f"Unexpected error showing loads: {str(e)}"
+            logging.error(error_msg)
+            print(f"{Fore.RED}{error_msg}{Style.RESET_ALL}")
 
     def test_connection(self):
         """Test PostgreSQL connection and print detailed information."""
@@ -1188,8 +1166,252 @@ class SQLiteEditor:
         pass
 
     def sync_to_postgres(self):
-        # Implementation of sync_to_postgres method
-        pass
+        """Sync SQLite database to PostgreSQL with improved type handling and incremental updates"""
+        if not self.pg_config:
+            logging.error("PostgreSQL configuration not found in sql.ini file")
+            print(f"{Fore.RED}PostgreSQL configuration not found. Please check sql.ini file.{Style.RESET_ALL}")
+            return
+
+        pg_conn = None
+        pg_cursor = None
+        sqlite_conn = None
+        sqlite_cursor = None
+
+        try:
+            logging.info("Starting PostgreSQL sync process")
+            print(f"\n{Fore.CYAN}Starting PostgreSQL sync...{Style.RESET_ALL}")
+            
+            # Connect to both databases
+            pg_conn = psycopg2.connect(**self.pg_config)
+            pg_cursor = pg_conn.cursor()
+            sqlite_conn = sqlite3.connect(self.db_path)
+            sqlite_cursor = sqlite_conn.cursor()
+            
+            # Get list of tables from SQLite
+            sqlite_cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = sqlite_cursor.fetchall()
+            logging.info(f"Found {len(tables)} tables in SQLite database")
+            
+            sync_stats = {
+                'tables_processed': 0,
+                'tables_created': 0,
+                'tables_updated': 0,
+                'records_inserted': 0,
+                'records_updated': 0,
+                'records_unchanged': 0,
+                'errors': []
+            }
+            
+            for (table_name,) in tables:
+                logging.info(f"Processing table: {table_name}")
+                print(f"\n{Fore.CYAN}Processing table: {table_name}{Style.RESET_ALL}")
+                
+                try:
+                    # Get table schema from SQLite
+                    sqlite_cursor.execute(f"PRAGMA table_info({table_name})")
+                    columns = sqlite_cursor.fetchall()
+                    logging.debug(f"Table {table_name} schema: {columns}")
+                    
+                    # Debug: Print column information for DWJJOB
+                    if table_name == 'DWJJOB':
+                        print(f"\n{Fore.YELLOW}DWJJOB Table Schema:{Style.RESET_ALL}")
+                        for col in columns:
+                            print(f"Column: {col[1]}, Type: {col[2]}, PK: {col[5]}")
+                        
+                        # Additional debugging for DWJJOB
+                        print(f"\n{Fore.YELLOW}DWJJOB Additional Checks:{Style.RESET_ALL}")
+                        
+                        # Check if table exists in SQLite
+                        sqlite_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='DWJJOB'")
+                        if not sqlite_cursor.fetchone():
+                            print(f"{Fore.RED}DWJJOB table does not exist in SQLite!{Style.RESET_ALL}")
+                            continue
+                        
+                        # Check table size
+                        sqlite_cursor.execute("SELECT COUNT(*) FROM DWJJOB")
+                        count = sqlite_cursor.fetchone()[0]
+                        print(f"Total rows in DWJJOB: {count}")
+                        
+                        # Get sample data if available
+                        sqlite_cursor.execute("SELECT * FROM DWJJOB LIMIT 1")
+                        sample = sqlite_cursor.fetchone()
+                        if sample:
+                            print(f"\nSample row: {sample}")
+                    
+                    # Map SQLite types to PostgreSQL types with better handling for large integers
+                    type_mapping = {
+                        'INTEGER': 'NUMERIC',  # Changed from BIGINT to NUMERIC to handle large integers
+                        'REAL': 'DOUBLE PRECISION',
+                        'TEXT': 'TEXT',
+                        'BLOB': 'BYTEA',
+                        'CHAR': 'VARCHAR(50)',  # Changed from CHAR to VARCHAR(50) to handle variable length strings
+                        'VARCHAR': 'VARCHAR',
+                        'BOOLEAN': 'BOOLEAN',
+                        'TIMESTAMP': 'TIMESTAMP',
+                        'DATE': 'DATE',
+                        'NUMERIC': 'NUMERIC',
+                        'DECIMAL': 'DECIMAL'
+                    }
+                    
+                    # Create column definitions
+                    column_defs = []
+                    primary_keys = []
+                    
+                    for col in columns:
+                        col_name = col[1]
+                        col_type = col[2].upper()
+                        
+                        # Handle special types with precision
+                        if 'SIGNED' in col_type:
+                            if '(' in col_type:
+                                precision = col_type[col_type.find('(')+1:col_type.find(')')]
+                                if ',' in precision:  # Decimal type
+                                    pg_type = f"DECIMAL({precision})"
+                                else:  # Integer type
+                                    pg_type = 'NUMERIC'  # Changed from BIGINT to NUMERIC
+                            else:
+                                pg_type = 'NUMERIC'  # Changed from BIGINT to NUMERIC
+                        elif 'DECIMAL' in col_type or 'NUMERIC' in col_type:
+                            if '(' in col_type:
+                                precision = col_type[col_type.find('(')+1:col_type.find(')')]
+                                pg_type = f"DECIMAL({precision})"
+                            else:
+                                pg_type = 'DECIMAL'
+                        elif col_type.startswith('CHAR('):
+                            pg_type = f"VARCHAR({col_type[5:-1]})"  # Changed from CHAR to VARCHAR
+                        elif col_type.startswith('VARCHAR('):
+                            pg_type = f"VARCHAR({col_type[8:-1]})"
+                        else:
+                            base_type = col_type.split('(')[0]
+                            pg_type = type_mapping.get(base_type, 'TEXT')
+                        
+                        is_pk = col[5] == 1
+                        if is_pk:
+                            primary_keys.append(col_name)
+                        
+                        column_defs.append(f"{col_name} {pg_type}")
+                    
+                    # Check if table exists in PostgreSQL
+                    pg_cursor.execute(f"""
+                        SELECT EXISTS (
+                            SELECT FROM information_schema.tables 
+                            WHERE table_name = '{table_name.lower()}'
+                        );
+                    """)
+                    table_exists = pg_cursor.fetchone()[0]
+                    
+                    if not table_exists:
+                        create_sql = f"CREATE TABLE {table_name} ({', '.join(column_defs)}"
+                        if primary_keys:
+                            create_sql += f", PRIMARY KEY ({', '.join(primary_keys)})"
+                        create_sql += ");"
+                        
+                        logging.info(f"Creating table {table_name} with SQL: {create_sql}")
+                        pg_cursor.execute(create_sql)
+                        pg_conn.commit()
+                        sync_stats['tables_created'] += 1
+                        print(f"{Fore.GREEN}Created table {table_name}{Style.RESET_ALL}")
+                    
+                    # Get data from SQLite
+                    sqlite_cursor.execute(f"SELECT * FROM {table_name}")
+                    sqlite_rows = sqlite_cursor.fetchall()
+                    logging.info(f"Found {len(sqlite_rows)} records in table {table_name}")
+                    
+                    if not sqlite_rows:
+                        print(f"{Fore.YELLOW}No data in table {table_name}{Style.RESET_ALL}")
+                        continue
+                    
+                    # Get column names
+                    column_names = [col[1] for col in columns]
+                    
+                    try:
+                        # Get existing records from PostgreSQL
+                        pg_cursor.execute(f"SELECT {', '.join(column_names)} FROM {table_name}")
+                        pg_rows = {tuple(row) for row in pg_cursor.fetchall()}
+                        
+                        # Convert SQLite rows to tuples for comparison
+                        sqlite_tuples = {tuple(row) for row in sqlite_rows}
+                        
+                        # Find new records (records that exist in SQLite but not in PostgreSQL)
+                        new_records = sqlite_tuples - pg_rows
+                        
+                        # Debug: Print counts for DWJJOB
+                        if table_name == 'DWJJOB':
+                            print(f"\n{Fore.YELLOW}DWJJOB Sync Status:{Style.RESET_ALL}")
+                            print(f"SQLite rows: {len(sqlite_rows)}")
+                            print(f"PostgreSQL rows: {len(pg_rows)}")
+                            print(f"New records to add: {len(new_records)}")
+                        
+                        # Insert only new records
+                        if new_records:
+                            insert_sql = f"""
+                                INSERT INTO {table_name} ({', '.join(column_names)})
+                                VALUES %s
+                            """
+                            psycopg2.extras.execute_values(
+                                pg_cursor, insert_sql, list(new_records),
+                                template=None,
+                                page_size=100
+                            )
+                            pg_conn.commit()
+                            sync_stats['records_inserted'] += len(new_records)
+                            print(f"{Fore.GREEN}Added {len(new_records)} new records{Style.RESET_ALL}")
+                        else:
+                            print(f"{Fore.YELLOW}No new records to add{Style.RESET_ALL}")
+                        
+                        # Count unchanged records
+                        unchanged_records = sqlite_tuples & pg_rows
+                        sync_stats['records_unchanged'] += len(unchanged_records)
+                        
+                    except Exception as e:
+                        logging.error(f"Error processing records for table {table_name}: {str(e)}")
+                        pg_conn.rollback()
+                        sync_stats['errors'].append(f"Record processing error in {table_name}: {str(e)}")
+                    
+                    sync_stats['tables_processed'] += 1
+                    if len(new_records) > 0:
+                        sync_stats['tables_updated'] += 1
+                    
+                except Exception as e:
+                    error_msg = f"Error syncing table {table_name}: {str(e)}"
+                    logging.error(error_msg)
+                    print(f"{Fore.RED}{error_msg}{Style.RESET_ALL}")
+                    sync_stats['errors'].append(error_msg)
+                    if pg_conn:
+                        pg_conn.rollback()
+                    continue
+            
+            # Print sync summary
+            print(f"\n{Fore.CYAN}Sync Summary:{Style.RESET_ALL}")
+            print(f"Tables Processed: {sync_stats['tables_processed']}")
+            print(f"Tables Created: {sync_stats['tables_created']}")
+            print(f"Tables Updated: {sync_stats['tables_updated']}")
+            print(f"Records Inserted: {sync_stats['records_inserted']}")
+            print(f"Records Unchanged: {sync_stats['records_unchanged']}")
+            
+            if sync_stats['errors']:
+                print(f"\n{Fore.RED}Errors encountered:{Style.RESET_ALL}")
+                for error in sync_stats['errors']:
+                    print(f"- {error}")
+            
+            logging.info("PostgreSQL sync completed")
+            print(f"\n{Fore.GREEN}PostgreSQL sync completed!{Style.RESET_ALL}")
+            
+        except Exception as e:
+            error_msg = f"Error during PostgreSQL sync: {str(e)}"
+            logging.error(error_msg)
+            print(f"{Fore.RED}{error_msg}{Style.RESET_ALL}")
+            if pg_conn:
+                pg_conn.rollback()
+        finally:
+            if sqlite_cursor:
+                sqlite_cursor.close()
+            if sqlite_conn:
+                sqlite_conn.close()
+            if pg_cursor:
+                pg_cursor.close()
+            if pg_conn:
+                pg_conn.close()
 
     def show_load_details(self, load_num):
         """Show detailed information about a specific load."""
@@ -1207,7 +1429,7 @@ class SQLiteEditor:
                 print(f"{Fore.YELLOW}No jobs found for load {load_num}{Style.RESET_ALL}")
                 return
             
-            # Get all vehicles for this load
+            # Get all vehicles for this load with their make/model
             self.cursor.execute("""
                 SELECT dwvVehRef, dwvModDes, dwvDriver, dwvStatus, dwvColCod, dwvDelCod
                 FROM DWVVEH
@@ -1252,13 +1474,29 @@ class SQLiteEditor:
                     collection_cust = next((j[2] for j in collections if j[5] == vehicle[4]), "Unknown")
                     delivery_cust = next((j[2] for j in deliveries if j[5] == vehicle[5]), "Unknown")
                     
-                    print(f"{Fore.WHITE}{vehicle[0]:<15} | {vehicle[1]:<30} | {vehicle[2]:<15} | {vehicle[3]:<10} | {collection_cust:<15} | {delivery_cust:<15}{Style.RESET_ALL}")
+                    # Format vehicle details - trim whitespace and handle null values
+                    reg = str(vehicle[0]).strip() if vehicle[0] else "Unknown"
+                    make_model = str(vehicle[1]).strip() if vehicle[1] else "Unknown"
+                    driver = str(vehicle[2]).strip() if vehicle[2] else "Unknown"
+                    status = str(vehicle[3]).strip() if vehicle[3] else "Unknown"
+                    
+                    # Only show if registration is not empty after trimming
+                    if reg and reg != "Unknown":
+                        print(f"{Fore.WHITE}{reg:<15} | {make_model:<30} | {driver:<15} | {status:<10} | {collection_cust:<15} | {delivery_cust:<15}{Style.RESET_ALL}")
             
             # Print summary
             print(f"\n{Fore.CYAN}Summary:{Style.RESET_ALL}")
             print(f"{Fore.WHITE}Collections: {len(collections)}{Style.RESET_ALL}")
             print(f"{Fore.WHITE}Deliveries: {len(deliveries)}{Style.RESET_ALL}")
             print(f"{Fore.WHITE}Vehicles: {len(vehicles)}{Style.RESET_ALL}")
+            
+            # Debug: Print raw vehicle data
+            if vehicles:
+                print(f"\n{Fore.YELLOW}Raw Vehicle Data:{Style.RESET_ALL}")
+                for vehicle in vehicles:
+                    reg = str(vehicle[0]).strip() if vehicle[0] else "Unknown"
+                    make_model = str(vehicle[1]).strip() if vehicle[1] else "Unknown"
+                    print(f"Registration: '{reg}', Make/Model: '{make_model}', Driver: '{vehicle[2]}', Status: '{vehicle[3]}', Collection: '{vehicle[4]}', Delivery: '{vehicle[5]}'")
             
         except sqlite3.Error as e:
             logging.error(f"Error showing load details: {e}")

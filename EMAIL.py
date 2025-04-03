@@ -113,8 +113,11 @@ def get_week_summary(week_end_date, timesheet_file):
         }
         
         print(f"{Fore.GREEN}✓ Successfully read timesheet!{Style.RESET_ALL}")
-        print(f"{Fore.WHITE}Total Loads: {total_loads}")
-        print(f"{Fore.WHITE}Total Vehicles: {total_vehicles}")
+        if total_loads > 0:
+            print(f"{Fore.WHITE}Total Loads: {total_loads}")
+            print(f"{Fore.WHITE}Total Vehicles: {total_vehicles}")
+        else:
+            print(f"{Fore.YELLOW}No loads found in timesheet - sending timesheet only{Style.RESET_ALL}")
         
         return summary
         
@@ -404,31 +407,7 @@ def check_paperwork_files(selected_sunday):
         week_email_dir = os.path.join(email_dir, week_end.strftime("%d-%m-%Y"))
         os.makedirs(week_email_dir, exist_ok=True)
         
-        # Check loadsheets directory
-        loadsheets_dir = os.path.join(SCRIPT_DIR, "loadsheets")
-        week_folder = os.path.join(loadsheets_dir, week_end.strftime("%d-%m-%Y"))
-        
-        if not os.path.exists(week_folder):
-            print_status("Loadsheets folder not found.", "error")
-            return False
-        
-        # Get list of loadsheets
-        loadsheets = [f for f in os.listdir(week_folder) if f.endswith('.xlsx')]
-        print_status(f"Converting {len(loadsheets)} loadsheets to PDF...")
-        
-        # Convert loadsheets to PDF
-        converted_loadsheets = []
-        for loadsheet in sorted(loadsheets):
-            excel_path = os.path.join(week_folder, loadsheet)
-            pdf_name = os.path.splitext(loadsheet)[0] + '.pdf'
-            pdf_path = os.path.join(week_email_dir, pdf_name)
-            
-            if convert_excel_to_pdf(excel_path, pdf_path):
-                converted_loadsheets.append(pdf_name)
-        
-        print_status(f"Converted {len(converted_loadsheets)} loadsheets", "success")
-        
-        # Check timesheet directory
+        # Check timesheet directory first
         timesheets_dir = os.path.join(SCRIPT_DIR, "timesheets")
         timesheet_folder = os.path.join(timesheets_dir, week_end.strftime("%Y%m%d"))
         timesheet_file = os.path.join(timesheet_folder, f"timesheet_{week_end.strftime('%Y%m%d')}.xlsx")
@@ -453,6 +432,32 @@ def check_paperwork_files(selected_sunday):
         if not week_summary:
             print_status("Failed to get week summary", "error")
             return False
+        
+        # Check loadsheets directory only if there are loads
+        if week_summary['total_loads'] > 0:
+            # Check loadsheets directory
+            loadsheets_dir = os.path.join(SCRIPT_DIR, "loadsheets")
+            week_folder = os.path.join(loadsheets_dir, week_end.strftime("%d-%m-%Y"))
+            
+            if not os.path.exists(week_folder):
+                print_status("Loadsheets folder not found.", "error")
+                return False
+            
+            # Get list of loadsheets
+            loadsheets = [f for f in os.listdir(week_folder) if f.endswith('.xlsx')]
+            print_status(f"Converting {len(loadsheets)} loadsheets to PDF...")
+            
+            # Convert loadsheets to PDF
+            converted_loadsheets = []
+            for loadsheet in sorted(loadsheets):
+                excel_path = os.path.join(week_folder, loadsheet)
+                pdf_name = os.path.splitext(loadsheet)[0] + '.pdf'
+                pdf_path = os.path.join(week_email_dir, pdf_name)
+                
+                if convert_excel_to_pdf(excel_path, pdf_path):
+                    converted_loadsheets.append(pdf_name)
+            
+            print_status(f"Converted {len(converted_loadsheets)} loadsheets", "success")
         
         # Get list of PDF and PNG files
         pdf_files = [f for f in os.listdir(week_email_dir) if f.endswith('.pdf')]
